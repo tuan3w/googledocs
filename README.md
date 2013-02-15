@@ -1,0 +1,1 @@
+OCR Tool like googledocs
