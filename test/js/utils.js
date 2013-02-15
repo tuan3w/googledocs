@@ -60,7 +60,14 @@ var Matrix = {
     }
 };
 
+/**
+ * Point object
+ */
 function Point(x,y){
     this.x = x;
     this.y = y;
 }
+
+/*
+ * Tool for line check
+ */

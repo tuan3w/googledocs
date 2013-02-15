@@ -25,3 +25,12 @@ body {
 	background: rgba(127, 225, 153,0.5);
 	z-index: 100;
 }
+#copy {
+	padding: 5px 30px;
+	position: absolute;
+	left: -100px;
+	z-index: 1000;
+	background: rgba(0,0,255,0.3);
+	display: none;
+	cursor: pointer;
+}
