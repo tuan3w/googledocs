@@ -13,9 +13,9 @@ function KohonenNetwork(inputCount, outputCount){
 	this.output = new Array(outputCount);
 	for (var i=0; i< this.output.length; i++)
 		this.output[i] = 0;
-	this.learnRate = 0.4;
+	this.learnRate = 0.3;
 	this.quitError = 0.01;
-	this.retries = 500;
+	this.retries = 800;
 	this.reduction =0.99;
 }
 /**
@@ -75,8 +75,7 @@ KohonenNetwork.prototype.vectorLength = function(v){
 };
 
 KohonenNetwork.prototype.winner = function(input, normfac){
-	//alert('get winer')
-	var i, win = 0;
+	var i, win;
 	var biggest, optr;
 
 	this.normalizeInput(input, normfac);
@@ -92,13 +91,13 @@ KohonenNetwork.prototype.winner = function(input, normfac){
 		if (this.output[i] > biggest){
 			biggest = this.output[i];
 			win = i;
+			//alert("win is " + i);
 		}
 		if (this.output[i] >1.0)
 			this.output[i] = 1.0;
 		if (this.output[i] <0.0)
 			this.output[i] = 0.0;
 	}
-
 	return win;
 };
 KohonenNetwork.prototype.evaluateErrors = function(rate, won, bigerr,correct, work){

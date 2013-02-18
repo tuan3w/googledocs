@@ -1,195 +1,538 @@
-
-/**
- * Ocr object
- */
-var Ocr = {
-    version : "1.0"
+var goo = {
+	version: "0.0.1",
+	author: "TuanZendF"
 };
-
-/**
- * Ocr Container Object
- */
-Ocr.Container = function(config) {
-
-    //varible
-    this.canvas = null;
-    this.context = null;
-    this.privCanvas = null;
-    this.privContext = null;
-
-    if (!config.container)
-        return;
-
-    if (config.width)
-        this.width = config.width;
-    else
-        this.width = 800;
-
-    if (config.height)
-        this.height = config.height;
-    else
-        this.height = 600;
-
-    this.canvas = document.createElement("canvas");
-    this.canvas.style.position = "absolute";
-    this.canvas.width = this.width;
-    this.canvas.height = this.height;
-    this.canvas.id = "Ocr-canvas";
-
-    // if ( typeof config.stroke == "string")
-    //     this.canvas.style.borderColor = config.stroke;
-    // if ( typeof config.strokeWidth)
-    //     this.canvas.style.borderWidth = config.strokeWidth + "px";
-    // this.canvas.style.borderStyle = "inset";
-    this.context = this.canvas.getContext("2d");
-
-    //private context
-    this.privCanvas = document.createElement("canvas");
-    this.privCanvas.width = this.width;
-    this.privCanvas.height = this.height;
-    this.privCanvas.style.position = "absolute";
-    this.privCanvas.id = "Ocr-priv-canvas";
-    this.privCanvas.setAttribute("display", "none");
-
-    this.privContext = this.privCanvas.getContext("2d");
-
-    //append to container
-    //document.getElementById(config.container).appendChild(this.privCanvas);
-    document.getElementById(config.container).appendChild(this.canvas);
-   
-
+goo.config = { //config
+	SAMPLEWIDTH : 8,
+	SAMPLEHEIGHT : 14
 };
+goo.Initialize = function(container,width, height){
 
-/**
- * Image Object
- * Only draw method
+	//create canvas div
+	goo.cv = document.createElement('canvas');
+	goo.privCanvas = document.createElement('canvas');
+
+	if (width && height && typeof width == 'number' && typeof height == 'number' ){
+		goo.privCanvas.width = goo.cv.width = width;
+		goo.privCanvas.height = goo.cv.height = height;
+	}
+	else {
+		goo.privCanvas.width = goo.cv.width = 400 ;
+		goo.privCanvas.height = goo.cv.height = 300;
+	}
+	goo.privCanvas.style.position = goo.cv.style.position = 'absolute';
+//	goo.privCanvas.style.top = '200px';
+	goo.privCanvas.style.zIndex = -1;
+	goo.privCanvas.style.display = 'none';
+
+
+	goo.hlContainer = document.createElement('div');
+	goo.hlContainer.style.width = 0;
+	goo.hlContainer.style.height = 0;
+	goo.hlContainer.style.position = 'absolute';
+	goo.hlContainer.style.zIndex = "100";
+	var parrent = document.getElementById(container);
+	parrent.appendChild(goo.cv);
+	parrent.appendChild(goo.privCanvas);
+	parrent.appendChild(goo.hlContainer);
+	goo.container = parrent;
+	goo.ct = goo.cv.getContext('2d');
+	goo.privContext = goo.privCanvas.getContext('2d');
+};
+goo.setSize = function(w, h){
+	goo.container.style.width = goo.privCanvas.style.width = goo.cv.style.width = w + 'px';
+	goo.container.style.height = goo.privCanvas.style.height = goo.cv.style.height  =  h + 'px';
+	goo.cv.width = goo.privCanvas.width = w;
+	goo.cv.height = goo.privCanvas.height = h;
+}
+/*
+ * goo.Bitmap
+ *
  */
-Ocr.Image = function(ImageData) {
-    this.context = ImageData.context;
-    this.data = this.context.createImageData(ImageData.width, ImageData.height);
+goo.Bitmap = function(img,fixSkew){
+	var that = this;
 
-    var arrayData = ImageData.data;
-    var data = this.data.data;
-    var index;
+	that.tool = null;
 
-    for (var i = 0; i < ImageData.height; i++) {
-        for (var j = 0; j < ImageData.width; j++) {
-            index = (i * ImageData.width + j) * 4;
-            data[index] = data[index + 1] = data[index + 2] = arrayData[i][j];
-            data[index + 3] = 255;
+	var tContext = goo.privContext;
+	var tCanvas = goo.privCanvas;
+	goo.setSize(img.width, img.height);
+	//get image data
+	tContext.setTransform(1,0,0,1,0,0);
+	tContext.drawImage(img, 0, 0)
+	var tempData = tContext.getImageData(0,0,img.width,img.height).data;
+	that.data = Matrix.create(img.height, img.width);
+	that.width = img.width;
+	that.height = img.height;
+
+	that.histGram = new Array(256);
+	for (var i=0; i< 256; i++)
+		that.histGram[i] = 0;
+	var index = 0;
+
+	for (var i=0; i< img.height; i++){
+		for (var j=0; j< img.width; j++){
+			that.data[i][j] = Math.floor(tempData[index] * 0.2 + tempData[index + 1] * 0.72 + 0.08 * tempData[index+2]);
+			index += 4;
+		}
+	}
+	//this.makeHistogram();
+	this.toBinary();
+	this.calcTextRange();
+
+	if (fixSkew) {
+		var angle = this.skewDetection();
+		//alert(angle * 180 / Math.PI);
+		tContext.rotate(-angle );
+		tContext.fillStyle = '#fff';
+		//	tContext.fillRect(0,0,img.width, img.height);
+		tContext.drawImage(img,0,0);
+		//alert('test')
+		var tempData = tContext.getImageData(0,0,img.width,img.height).data;
+		var index = 0;
+
+		that.data =  Matrix.create(img.height, img.width);
+		for (var i=0; i< img.height; i++){
+			for (var j=0; j< img.width; j++){
+				that.data[i][j] = Math.floor(tempData[index] * 0.2 + tempData[index + 1] * 0.72 + 0.08 * tempData[index+2]);
+				index += 4;
+			}
+		}
+		this.toBinary();
+		this.calcTextRange();
+			// this.skewCorection(angle);
+			// this.calcTextRange();
+	}
+		
+	//}
+};
+var Bitmap_proto = goo.Bitmap.prototype;
+/**
+ * Draw Bitmap data
+ */
+Bitmap_proto.draw = function(x,y){
+	//goo.ct.clearRect(0,0,goo.ct.width, goo.ct.height);
+	goo.drawImage(this.data, x, y);
+};
+/**
+ * normalize input data
+ * output size 14 x 10
+ */
+goo.Bitmap.extractFeature = function(input){
+    var DOWNSAMPLE_HEIGHT = goo.config.SAMPLEHEIGHT ;
+    var DOWNSAMPLE_WIDTH = goo.config.SAMPLEWIDTH;
+
+    var width = input[0].length;
+    var height = input.length;
+
+  	//create feature matrix --> set indensity featuree
+	var out = Matrix.create(DOWNSAMPLE_HEIGHT, DOWNSAMPLE_WIDTH);
+ 	var cellWidth= width / DOWNSAMPLE_WIDTH;
+    var cellHeight = height/ DOWNSAMPLE_WIDTH;
+
+    var gray;
+    for(var row = 0, i= 0; row<DOWNSAMPLE_WIDTH; row++ )
+    {
+        for(var col = 0; col<DOWNSAMPLE_WIDTH; col++)
+        {
+            var x = Math.floor(cellHeight * row );
+            var y =Math.floor(cellWidth * col);
+
+            var maxX = x + cellHeight ;
+            if (maxX >= height -1 )
+            	maxX = height - 1;
+            var maxY = y + cellWidth;
+            if (maxY > width - 1)
+            	maxY = width - 1;
+
+            gray = 0;
+            for (var i=x ; i <maxX; i++)
+	            for(var j =y; j< maxY; j++)
+	            {
+	                if (input[i][j] == 0)
+	                	gray ++;
+	            }
+            out[row][col] = (gray * 1.0 / (cellWidth * cellHeight) - 0.5) * 2;
         }
     }
-};
-Ocr.Image.prototype.draw = function(x, y) {
-    this.context.putImageData(this.data, x, y);
 
-    var width = this.data.data.length;
-    var height = this.data.data[0].length;
+    //sccaleDownImage
+    var cellWidth= width / DOWNSAMPLE_WIDTH;
+    var cellHeight = height/ DOWNSAMPLE_WIDTH;
 
-    this.context.strokeStyle = "#ff0000";
-    // this.context.strokeRect(x, y, 400,300);
-};
-/**
- * ImageData Object
- * @param ocrObj Ocr container object
- */
-Ocr.ImageData = function(ocrObj, config) {
+    var sample = Matrix.create(DOWNSAMPLE_WIDTH, DOWNSAMPLE_WIDTH);
+    Matrix.fill(sample,0);
 
-    //canvas
-    this._super = ocrObj;
-    this.canvas = ocrObj.canvas;
-    this.context = ocrObj.context;
-    this.privCanvas = ocrObj.privCanvas;
-    this.privContext = ocrObj.privContext;
+    for(var row = 0, i= 0; row<DOWNSAMPLE_WIDTH; row++ )
+    {
+        for(var col = 0; col<DOWNSAMPLE_WIDTH; col++)
+        {
+            var x = Math.floor(cellHeight * row );
+            var y =Math.floor(cellWidth * col);
+            
+            var d = false;
 
-    var index;
+            // see if at least one pixel is "black"
+            var maxX = x + cellHeight ;
+            if (maxX >= height -1 )
+            	maxX = height - 1;
+            var maxY = y + cellWidth;
+            if (maxY > width - 1)
+            	maxY = width - 1;
+            for (var i=x ; i <maxX; i++)
+	            for(var j =y; j< maxY; j++)
+	            {
 
-    var imgData;
-    //get imageData from an Image
-    if (config.image) {
-        if (!config.height)
-            config.height = config.image.height;
-        if (!config.width)
-            config.width = config.image.height;
-
-        this.width = config.width;
-        this.height = config.height;
-        this.privContext.drawImage(config.image, 0, 0, this.width, this.height);
-        imgData = this.privContext.getImageData(0, 0, this.width, this.height);
-        this.privContext.clearRect(0, 0, this.width, this.height);
-    }
-
-    //get imageData from other ImageData
-    else if (config.imageData) {
-        imgData = this.context.createImageData(config.imageData.imgData);
-        for (var i = this.imgData.data.length - 1; i >= 0; i--) {
-            imgData.data[i] = config.imageData.imgData.data[i];
-        }
-        this.width = config.imageData.width;
-        this.height = config.imageData.height;
-    } else if (config.data) {//getImageData from an array
-        this.height = config.data.length;
-        this.width = config.data[0].length;
-        // this.data
-        this.data = new Array(this.height);
-
-        for (var i = 0; i < this.height; i++) {
-            this.data[i] = new Array(this.width);
-            for (var j = 0; j < this.width; j++) {
-                this.data[i][j] = config.data[i][j];
+	                if( input[i][j] == 0 ) 
+	                {
+	                    d = true;
+	                    break;
+	                }
+	            }
+            if( d ){
+                sample[row][col] = 1;  //back point
+            } else {
+                sample[row][col] = 0;  //white point
             }
         }
-        // this.data = Matrix.clone(config.data);
-    } else {
-        //create new ImageData
-        if (!config.width)
-            config.width = 400;
-        if (!config.height)
-            config.height = 300;
-        imgData = this.context.createImageData(config.width, config.height);
-        this.width = config.width;
-        this.height = config.height;
     }
-    //get grayData
-    if (!config.data) {
-        //createData
-        this.data = new Array(this.height);
-        for (var i = 0; i < this.height; ++i)
-            this.data[i] = new Array(this.width);
 
-        for (var i = 0; i < this.height; ++i) {
-            for (var j = 0; j < this.width; ++j) {
-                index = (i * this.width + j) << 2;
+    //extract other feature
+    for (var i=0; i< DOWNSAMPLE_WIDTH; i++) {
 
-                this.data[i][j] = Math.floor(imgData.data[index] * 0.2 + imgData.data[index + 1] * 0.72 + 0.08 * imgData.data[index + 2]);
-            }
-        }
+    	// //vertical an hotizontal projection
+    	// var count = 0;
+    	// for (var j=DOWNSAMPLE_WIDTH/2; j >= 0; j--) 
+    	// 	count += sample[j][i];
+
+    	// out[DOWNSAMPLE_WIDTH][i] = count * 2.0 / (DOWNSAMPLE_WIDTH);
+
+    	// count = 0;
+    	// for (var j=DOWNSAMPLE_WIDTH/2 + 1; j< DOWNSAMPLE_WIDTH; j++) 
+    	// 	count += sample[j][i];
+    	// out[DOWNSAMPLE_WIDTH + 1][i] = count * 2.0 / (DOWNSAMPLE_WIDTH);
+
+    	count = 0;
+    	for (var j=0; j< DOWNSAMPLE_WIDTH/2; j++)
+    		count += sample[i][j];
+    	out[DOWNSAMPLE_WIDTH + 4][i] = count * 2.0 / (DOWNSAMPLE_WIDTH);
+
+    	count = 0;
+    	for (var j=DOWNSAMPLE_WIDTH/2 + 1; j< DOWNSAMPLE_WIDTH; j++) 
+    		count += sample[i][j];
+    	out[DOWNSAMPLE_WIDTH + 5][i] = count * 2.0 / (DOWNSAMPLE_WIDTH);
+
+    	//vertical and hotizontal profile
+    	var j = 0;
+    	while (j< DOWNSAMPLE_WIDTH && sample[i][j] == 0 ) j++;
+    	out[DOWNSAMPLE_WIDTH][i] = j * 1.0 / DOWNSAMPLE_WIDTH ;
+    	//alert(out[DOWNSAMPLE_WIDTH][i])
+
+    	var j = DOWNSAMPLE_WIDTH - 1;
+    	while (j>=0 && sample[i][j] == 0 ) j--;
+    	out[DOWNSAMPLE_WIDTH + 1][i] = (DOWNSAMPLE_WIDTH - j) * 1.0 / DOWNSAMPLE_WIDTH;
+
+		var j = 0;
+    	while (j< DOWNSAMPLE_WIDTH && sample[j][i] == 0) j++;
+    	out[DOWNSAMPLE_WIDTH + 2][i] = j * 1.0 / DOWNSAMPLE_WIDTH;
+
+    	var j = DOWNSAMPLE_WIDTH - 1;
+    	while (j>=0 && sample[j][i] == 0 ) j--;
+    	out[DOWNSAMPLE_WIDTH + 3][i] = (DOWNSAMPLE_WIDTH - j) * 1.0 / DOWNSAMPLE_WIDTH;
+
     }
+    delete sample;
+  // alert(out)
+    return out;
 };
+goo.drawImage = function(arr,x,y,isPrivContext) {
 
-Ocr.ImageData.prototype.exportToImage = function() {
-    return new Ocr.Image(this);
+	var img = goo.ct.createImageData(arr[0].length, arr.length);
+	var imgData = img.data;
+	var index = 0;
+	for (var i=0; i< arr.length; i ++){
+		for (var j=0; j< arr[0].length; j++){
+			imgData[index + 2] = imgData[index + 1]= imgData[index] = arr[i][j];
+			imgData[index + 3] = 255;
+			index+=4;
+		}
+	}
+	var ct;
+	if (isPrivContext)
+		ct = goo.privContext;
+	else
+		ct = goo.ct;
+
+	if (x &&  y )
+		ct.putImageData(img, x, y);
+	else
+		ct.putImageData(img, 0, 0);
+	//goo.ct.strokeRect(this.left, this.top, this.right - this.left + 1, this.bottom - this.top +1 );
+	return this;
 };
-
-Ocr.ImageData.prototype.invert = function() {
+Bitmap_proto.getBitmap = function(o){
+	var data = this.data;
+	var tBitmap = Matrix.create(o.h + 1, o.w + 1);
+	for (var i=0; i< o.h; i++){
+		for (var j=0; j< o.w; j++){
+			tBitmap[i][j] = data[o.y +i][o.x + j];
+		}
+	}
+	return tBitmap;
+};
+/**
+ * Add highlight tool
+ */
+Bitmap_proto.addHighlightTool = function(){
+	this.tool = new goo.Tool(this);
+};
+Bitmap_proto.addOCRTool = function(tool){
+	//this.OCRTool = tool;
+};
+/**
+ * Inverse transform
+ */
+Bitmap_proto.inverse = function(){
+	for (var i=0; i< this.height; i++){
+		for (var j=0; j<this.width; j++){
+			this.data[i][j] = 255 - this.data[i][j];
+		}
+	}
+}
+/**
+ * Normalized transform
+ */
+Bitmap_proto.normalize = function() {
+    var min = 255;
+    var max = 0;
     for (var i = 0; i < this.height; i++) {
         for (var j = 0; j < this.width; j++) {
-            this.data[i][j] = 255 - this.data[i][j];
+            if (this.data[i][j] < min) {
+                min = this.data[i][j];
+                //  alert(min);
+            }
+            if (this.data[i][j] > max)
+                max = this.data[i][j];
+        }
+    }
+    var range = max - min;
+    if (range == 255) //normalized
+        return;
+    for (var i = 0; i < this.height; i++) {
+        for (var j = 0; j < this.width; j++) {
+            this.data[i][j] = Math.floor(255 * 1.0 * (this.data[i][j] - min) / range);
         }
     }
 };
-Ocr.ImageData.prototype.clone = function() {
-    return new Ocr.ImageData(this._super, {
-        data : this.data
-    });
+/**
+ * History gram
+ */
+Bitmap_proto.makeHistogram = function(){
+	var data = this.data;
+	for (var i=0; i< this.height; i++){
+		for (var j=0; j< this.width; j++){
+			this.histGram[data[i][j]]++;		
+		}
+	} 
+	for (var i=0; i< 256; i++){
+		this.histGram[i] /= (this.width * this.height);
+	}
+	return this.histGram;
+	
+};
+/**
+ * Check a line in image is empty
+ */
+Bitmap_proto.isEmptyLine = function(y,left,right){
+	var data = this.data;
+	var blackPoints = 0;
+	if (!left && !right) {
+		left = this.left;
+		right = this.right;
+	}
+
+	for (var i= right; i>= left; i--)
+		if (data[y][i] == 0) {
+			blackPoints ++;
+			if (blackPoints > 0) //number of black points is larger than 1 (in row)
+				return false;
+		}
+	
+	return true;
+};
+
+/**
+ * Check a collumn in image is empty
+ */
+Bitmap_proto.isEmptyCol = function(x,y1,y2){
+	var data = this.data;
+	var count = 0;
+	for (var i = y1; i<= y2; i++)
+		if (data[i][x] == 0) {
+			count ++;
+			if (count > 0)
+				return false;
+		}
+	
+	return true;
+};
+/**
+ * find nextEmptyline
+ * y {number} y-coordinate
+ */
+Bitmap_proto.findNextEmptyLine = function(y){
+	y++;
+	if (y > this.bottom)
+		return y;
+	if ( this.isEmptyLine(y))
+		while ( y <= this.bottom && this.isEmptyLine(y)) y++;
+	else {
+		while ( y <= this.bottom && ! this.isEmptyLine(y)) y++;
+		y--;
+	}
+	return y;
+};
+Bitmap_proto.findNextCol = function(x, y1, y2, dir) {
+	if (dir == 0 ){
+		if (this.isEmptyCol(x,y1,y2)) {
+			x++;
+			while ((this.isEmptyCol(x,y1,y2)) && x <= this.right) x++;
+			x --;
+		}else {
+			while (!this.isEmptyCol(x+1,y1,y2) &&  x <= this.right) x++;
+		//	x --;
+		}
+	}
+	else {
+		if (this.isEmptyCol(x,y1,y2)) {
+			x--;
+			while (this.isEmptyCol(x,y1,y2) && x >= this.left) x--;
+		}else {
+			while (!this.isEmptyCol(x-1,y1,y2) && x  >= this.left) x--;
+		}
+	}
+	return x;
 }
+/**
+ * Skew Detection
+ *
+ */
+Bitmap_proto.skewDetection = function() {
+
+    //var PMAX =this.width * this.width + this.height * this.height;
+    //var PMAX = PMAX * 5 +1;
+    //test over 100 x 100
+    var PMAX = 100 + 500 ;
+    htable = Matrix.create(PMAX, 91);
+   	Matrix.fill(htable, 0);
+    // htable = new Array(this.width + this.height);
+    // for (var i = 0; i < PMAX; i++) {
+    //     htable[i] = new Array(181);
+    //     for (var j = 0; j < htable[i].length; j++)
+    //         htable[i][j] = 0;
+    // }
+
+    var max = 0;
+    var angle = 0;
+    var change = Math.PI / 180;
+    for (var i = 0; i < 100; i++) {
+        for (var j =0; j < 500; j++) {
+            if (this.data[this.top + i ][this.left + j] == 0) {
+                for (var a = 0; a < 45; a += 0.5) {
+                    var temp = a * change;
+                    p = Math.floor(i * Math.sin(temp) + j * Math.cos(temp));
+                    htable[p][a * 2 ] += 1;
+                    if (htable[p][a * 2 ] > max) {
+                        max = htable[p][a * 2];
+                        angle = a;
+                    }
+                }
+            }
+        }
+    }
+
+    delete htable;
+    return angle * change;
+};
+Bitmap_proto.skewCorection = function(theta){
+	var tmp = new Array(this.height);
+    for (var i = 0; i < tmp.length; i++) {
+        tmp[i] = new Array(this.width);
+        for (var j = 0; j < tmp[i].length; j++)
+            tmp[i][j] = 255;
+    }
+
+    for (var i = 0; i < this.height; i++) {
+        for (var j = 0; j < this.width; j++) {
+            var newX = Math.floor(Math.cos(theta) * j + Math.sin(theta) * i);
+            var newY = Math.floor(-Math.sin(theta) * j + Math.cos(theta) * i);
+
+            if (0 <= newX && newX < this.width && 0 <= newY && newY < this.height)
+                tmp[newY][newX] = this.data[i][j];
+        }
+    }
+
+    for (var i = 0; i < this.height; i++) {
+        for (var j = 0; j < this.width; j++) {
+            this.data[i][j] = tmp[i][j];
+        }
+    }
+
+}
+/**
+ * Find next empty col follow a direction
+ */
+Bitmap_proto.findEmptyCol = function(x,y1,y2,dir){
+	if ( dir == 0) {
+		if (this.isEmptyCol(x,y1,y2)) {
+			x++;
+			while (this.isEmptyCol(x,y1,y2) && x <= this.right) x++;
+		}else {
+			x --;
+			while (!this.isEmptyCol(x-1,y1,y2) && x >= this.left) x--;
+			x++;
+		}
+	}else {
+		if (this.isEmptyCol(x,y1,y2)) {
+			x--;
+			while (this.isEmptyCol(x,y1,y2) && x >= this.left) x--;
+		}else {
+			x ++;
+			while (!this.isEmptyCol(x+1,y1,y2) && x <= this.right) x++;
+			x --;
+		}
+	}
+	return x;
+};
+/**
+ * Histogram equalize
+ */
+Bitmap_proto.histEqualize = function(){
+	this.makeHistogram();
+	var fixGray = new Array(256);
+	fixGray[0] =0;
+	for (var i=1; i< 256; i++){
+		fixGray[i] = Math.floor(fixGray[i-1] + this.histGram[i] * i);
+		
+	}
+
+	//fix gray
+	for (var i=0; i< this.height; i++){
+		for (var j=0; j< this.width; j++){
+			this.data[i][j] = fixGray[this.data[i][j]];		
+		}
+	} 
+};
+
 /**
  * convert to binary Image
  */
-Ocr.ImageData.prototype.toBinaryImage = function(threshold) {
+Bitmap_proto.toBinary = function(threshold) {
+    //alert('binary');
     if (threshold) { //has threshold parameters
         for (var i = 0; i < this.height; i++) {
             for (var j = 0; j < this.width; j++) {
+		//alert(this.data + "is" );
                 if (this.data[i][j] < threshold)
                     this.data[i][j] = 0;
                 else
@@ -197,6 +540,7 @@ Ocr.ImageData.prototype.toBinaryImage = function(threshold) {
             }
         }
     } else {
+	//alert('local')
         //use local threshold algorithm
         //local size : 5x5
         for (var x = 0; x < this.height - 5; x += 5) {
@@ -217,7 +561,7 @@ Ocr.ImageData.prototype.toBinaryImage = function(threshold) {
                 var mid_gray = (max + min) / 2;
 
                 if (local_constrast < threshold_constrast) {
-                    if (mid_gray < 128)//foreground
+                    if (mid_gray < 50)//foreground
                         for (var i = x; i < x + 5; i++) {
                             for (var j = y; j < y + 5; j++) {
                                 this.data[i][j] = 0;
@@ -245,524 +589,466 @@ Ocr.ImageData.prototype.toBinaryImage = function(threshold) {
         }
     }
 };
-Ocr.ImageData.prototype.draw = function(x, y) {
-    var img = this.exportToImage();
-    img.draw(x, y);
-}
-Ocr.ImageData.prototype.combine = function(imgData) {
-    var data2 = imgData.data;
-    for (var i = 0; i < this.height; i++) {
-        for (var j = 0; j < this.width; j++) {
-            var temp = Math.sqrt(this.data[i][j] * this.data[i][j] + data2[i][j] * data2[i][j]);
-            this.data[i][j] = temp > 255 ? 255 : Math.floor(temp);
-        }
-    }
-}
-Ocr.ImageData.prototype.filter = function(filter) {
-    this.data = Matrix.convolve(this.data, filter);
-};
-Ocr.ImageData.prototype.smooth = function(){
+Bitmap_proto.calcTextRange = function(){
+	this.left = 0;
+	this.right = this.width - 1;
+	this.top = 0;
+	this.bottom = this.height - 1;
 
-    var gaussFilter = [
-        [2.0/160, 4.0/160, 5.0/160, 5.0/160, 2.0/160],
-        [4.0/160, 9.0/160, 12.0/160, 9.0/160, 4.0/160],
-        [5.0/160, 12.0/160, 15.0/160, 12.0/160, 5.0/160],
-        [4.0/160, 9.0/160, 12.0/160, 9.0/160, 4.0/160],
-        [2.0/160, 4.0/160, 5.0/160, 5.0/160, 2.0/160]
-    ];
-    this.filter(gaussFilter);
-}
-Ocr.ImageData.prototype.cannyEdgeDetector = function() {
-    var sowerby_x = [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]];
-    var sowerby_y = [[-1, -2, -1], [0, 0, 0], [1, 2, 1]];
-    //var prewitt_x = [[-1, 0, 1], [-1, 0,1], [-1, 0, 1]]
-    //var prewitt_y = [[-1, -1, -1], [0, 0, 0], [1, 1, 1]];
-    var grX = Matrix.clone(this.data);
-    grX = Matrix.convolve(grX, sowerby_x);
+	var isEdge = false;
+	var count = 0;
 
-    var grY = Matrix.clone(this.data);
-    grY = Matrix.convolve(grY, sowerby_y);
+	//find left border
+	while (!isEdge){
+		count = 0;
+		for (var i=0; i< this.height; i++)
+			if (this.data[i][this.left] == 0)
+				count ++;
 
-    var mag = this.data;
-    var dir = Matrix.create(grX.length, grX[0].length);
+		if (count > 0){ //number of black points is larger than 10 points
+			isEdge = true;
+		}
+		else
+			this.left ++;
+	}
+	//find right border
+	isEdge = false;
+	while (!isEdge){
+		count = 0;
+		for (var i=0; i< this.height; i++)
+			if (this.data[i][this.right] == 0)
+				count ++;
 
-    //cal mag and direction
-    for (var i = 1; i < this.height-1; i++) {
-        for (var j = 1; j < this.width-1; j++) {
-            mag[i][j] = Math.floor(Math.sqrt(grX[i][j] * grX[i][j] + grY[i][j] * grY[i][j]));
-            dir[i][j] = calDirection(grX[i][j], grY[i][j]);
-        }
-    }
+		if (count > 0){ //number of black points is larger than 10 points
+			isEdge = true;
+		}
+		else
+			this.right--;
+	}
+	//find top border
+	isEdge = false;
+	while (!isEdge){
+		count = 0;
+		for (var i=0; i< this.width; i++)
+			if (this.data[this.top][i] == 0)
+				count ++;
 
-    //NonMaximaSuppressor
-    for (var i = 1; i < mag.length - 1; i++) {
-        for (var j = 1; j < mag[0].length - 1; j++) {
-            switch(dir[i][j]) {
-                case 0:
-                    mag[i][j] = 0;
-                    break;
-                case 1:
-                    if (mag[i][j] < mag[i-1][j] || mag[i][j] < mag[i+1][j])
-                        mag[i][j] = 0;
-                    break;
-                case 2:
-                    if (mag[i][j] < mag[i+1][j] || mag[i][j] < mag[i][j+1])
-                        mag[i][j] = 0;
-                    break;
-                case 3:
-                    if (mag[i][j] < mag[i+1][j + 1] || mag[i][j] < mag[i-1][j - 1]) {
-                        mag[i][j] = 0;
-                    }
-                    break;
-                case 4:
-                    if (mag[i][j] < mag[i+1][j - 1] || mag[i][j] < mag[i-1][j + 1]) {
-                        mag[i][j] = 0;
-                    }
-                    break;
-            }
-        }
-    }
+		if (count > 0){ //number of black points is larger than 10 points
+			isEdge = true;
+		}
+		else
+			this.top++;
+	}
 
-    //threshold
-    //var max = 80,
-    //var min = 20
-    for (var i = 0; i < mag.length; i++) {
-        for (var j = 0; j < mag[0].length; j++) {
-            if (mag[i][j] >= 80)
-                mag[i][j] = 255;
-            else if (mag[i][j] < 20)
-                mag[i][j] = 0;
-            else
-                mag[i][j] = 128;
-        }
-    }
-    //track
-    var update = true;
-    while (update) {
-        update = false;
+	//find bottom border
+	isEdge = false; 
+	while (!isEdge){
+		count = 0;
+		for (var i=0; i< this.width; i++)
+			if (this.data[this.bottom][i] == 0)
+				count ++;
 
-        for (var i = 1; i < mag.length - 1; i++) {
-            for (var j = 0; j < mag[0].length - 1; j++) {
-                if (mag[i][j] == 255) {
-                    for (var m = -1; m < 2; m++) {
-                        for (var n = -1; n < 2; n++) {
-                            if (mag[i+m][j + n] == 128) {
-                                mag[i+m][j + n] = 255;
-                                update = true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    //remove weak edge
-    for (var i = 0; i < mag.length; i++) {
-        for (var j = 0; j < mag[0].length; j++) {
-            if (mag[i][j] <255  ){
-                mag[i][j] = 0;
-            }
-        }
-    }
-    //function
-    function calDirection(x, y) {
-        if (x == 0)
-            if (y == 0)
-                return 0;
-            else
-                return 1;
-        if (y == 0)
-            return 2;
-    
-        var angle = Math.atan(y * 1.0 / x) * (180.0 / Math.PI);
-        if (-22.5 <= angle && angle <= 22.5){
-            return 2;
-        }
-        else if (-67.5 <= angle && angle <-22.5){
-            return 4;
-        }
-        else if ( 22.5 <= angle && angle < 67.5)
-            return 3;
-        else if (angle > 67.5 || angle <-67.5)
-            return 1;
-    }
-};
-Ocr.ImageData.prototype.normalize = function() {
-    var min = 255;
-    var max = 0;
-    for (var i = 0; i < this.height; i++) {
-        for (var j = 0; j < this.width; j++) {
-            if (this.data[i][j] < min) {
-                min = this.data[i][j];
-                //  alert(min);
-            }
-            if (this.data[i][j] > max)
-                max = this.data[i][j];
-        }
-    }
-    var range = max - min;
-    if (range == 255) //normalized
-        return;
-    for (var i = 0; i < this.height; i++) {
-        for (var j = 0; j < this.width; j++) {
-            this.data[i][j] = Math.floor(255 * 1.0 * (this.data[i][j] - min) / range);
-        }
-    }
+		if (count > 0){ //number of black points is larger than 10 points
+			isEdge = true;
+		}
+		else
+			this.bottom--;
+	}
+	console.log('top : ' + this.top + ',botom : ' + this.bottom + ', right: ' + this.right + ',left: ' + this.left);
 };
 /**
- * Skew Detection
+ * Highlight tool 
  *
  */
-Ocr.ImageData.prototype.skewDetection = function() {
-    //var PMAX =this.width * this.width + this.height * this.height;
-    //var PMAX = PMAX * 5 +1;
-    var PMAX = this.width + this.height;
-    htable = new Array(this.width + this.height);
-    for (var i = 0; i < PMAX; i++) {
-        htable[i] = new Array(91);
-        for (var j = 0; j < htable[i].length; j++)
-            htable[i][j] = 0;
-    }
+goo.Tool = function(bitmap){
+	this.bitmap = bitmap;
+	this.hlSet = []; //highlight containers
 
-    var max = 0;
-    var angle = 0;
-    var change = Math.PI / 180;
-    for (var i = 0; i < this.height; i++) {
-        for (var j = 0; j < this.width; j++) {
-            if (this.data[i][j] == 0) {
-                for (var a = 0; a < 45; a += 1) {
-                    var temp = a * change;
-                    p = Math.floor(i * Math.sin(temp) + j * Math.cos(temp));
-                    htable[p][a + 45] += 1;
-                    if (htable[p][a] > max) {
-                        max = htable[p][a];
-                        angle = a;
-                    }
-                }
-            }
-        }
-    }
+	var that = this;
+	var p1, p2;
+	var scrollLeft = window.pageXOffset ? window.pageXOffset : document.documentElement.scrollLeft ? document.documentElement.scrollLeft : document.body.scrollLeft;
+	var scrollTop = window.pageYOffset ? window.pageYOffset : document.documentElement.scrollTop ? document.documentElement.scrollTop : document.body.scrollTop;
 
-    //alert ("angle is "+ angle);
+	var x, y;
+	var isMousedown = false;
+	function getMousePos(e){
+		x = e.clientX - goo.cv.parentNode.offsetLeft + scrollLeft;
+		y = e.clientY - goo.cv.parentNode.offsetTop + scrollTop;
+	}
 
-    this.skewCorrection(angle * Math.PI / 180);
-};
-Ocr.ImageData.prototype.getContext = function() {
-    return this.context;
-};
-Ocr.ImageData.prototype.getCanvas = function() {
-    return this.canvas;
-};
-Ocr.ImageData.prototype.setData = function(data) {
-    this.data = data;
-};
-Ocr.ImageData.prototype.getData = function() {
-    return this.data;
+	//var OCRTool = bitmap.OCRTool ? bitmap.OCRTool : undefined;
+
+	//var hasClipboard = (OCRTool && OCRTool.clip) ? true : false;
+	goo.container.addEventListener("mouseup", handler,false);
+	goo.container.addEventListener("mousedown", handler,false);
+	goo.container.addEventListener("mousemove", handler,false);
+	function handler(e){	
+		//console.log(x + "," + y);
+		switch (e.type){
+			case "mousedown":
+				//alert('mouse down')
+				isMousedown = true;
+				
+				//alert(x);
+				getMousePos(e);
+				p1 = new Point(x,y);
+				break;
+			case "mousemove":
+				if (isMousedown) {
+					console.log("mouse is move")
+					getMousePos(e);
+					p2 = new Point(x,y);
+					if ( p1.y < p2.y)
+						that.separateLine(p1, p2);
+					else
+						that.separateLine(p2, p1);
+					goo.Highlight(that.hlSet);
+
+				}
+				break;
+			case "mouseup":
+				isMousedown = false;
+				//alert('mouse up')
+				//if (OCRTool ) {    //recognition
+					//alert('has tool')
+				//	that.separateChar(true);
+					//var data = that.getData();
+					//alert(data.length);
+					// OCRTool.recognize_actionPerformed(data);
+					// //alert(OCRTool.getResult());
+					// if (OCRTool.clip) {//has clipboard
+					//  	OCRTool.clip.setText(OCRTool.getResult());
+					// }
+				//}
+				break;
+		}
+	}
 }
-
-Ocr.ImageData.prototype.skewCorrection = function(theta) {
-
-    var tmp = new Array(this.height);
-    for (var i = 0; i < tmp.length; i++) {
-        tmp[i] = new Array(this.width);
-        for (var j = 0; j < tmp[i].length; j++)
-            tmp[i][j] = 255;
-    }
-
-    for (var i = 0; i < this.height; i++) {
-        for (var j = 0; j < this.width; j++) {
-            var newX = Math.floor(Math.cos(theta) * j + Math.sin(theta) * i);
-            var newY = Math.floor(-Math.sin(theta) * j + Math.cos(theta) * i);
-
-            if (0 <= newX && newX < this.width && 0 <= newY && newY < this.height)
-                tmp[newY][newX] = this.data[i][j];
-        }
-    }
-
-    for (var i = 0; i < this.height; i++) {
-        for (var j = 0; j < this.width; j++) {
-            this.data[i][j] = tmp[i][j];
-        }
-    }
-
+var tool_proto = goo.Tool.prototype;
+/**
+ * Get highlight set
+ */
+tool_proto.getHighLightSet = function(){
+	return this.hlSet;
 };
 /**
- * Entry prototype
- * @param {object} config
- * @param  config.container  container canvas
- * @param config.target   target
- * @param config.line  number of lines
- * @param config.guide display guide line
- * @param config.delay delay time
- * @param config.enabled enable/disable
+ * hihlight paragraph bound by 2 points
+ * 
  */
+tool_proto.separateLine = function(p1, p2){
+	console.log('highlight')
+	var that = this;
+	that.hlSet = [];
+	//remove history highlight
+	goo.hlContainer.innerHTML = "";
+	var bitmap = that.bitmap;
+	var left = bitmap.left;
+	var right = bitmap.right;
+	var top = bitmap.top;
+	var bottom = bitmap.bottom
+	
+	//alert(p1.x + ',' + p2.x)
 
-Ocr.Entry = function(config){
-    if (!config.container )
-        throw "Not found Container";
-    if (!config.target)
-        throw "Not found target";
+	//not separateLine if out of text range
+	if ((p1.x < bitmap.left && p2.x < bitmap.left )||
+		(p1.x > bitmap.right && p2.x > bitmap.right)||
+		( p2.y < bitmap.top)||
+		(p1.y > bitmap.bottom))
+		return;
+	
 
-    //load canvas
-    this._super = config.container;
-    this._target = document.getElementById(config.target);
+	
 
-    this.canvas = config.container.canvas;
-    this.context = config.container.context;
+	var y1,y2,x1,x2;
+	//find top-line 
+	y1 = p1.y;
+	if ( y1 < top)
+		y1 = top;
+	else 
+	if (bitmap.isEmptyLine(y1))  //move down
+		while (bitmap.isEmptyLine(y1)) y1 ++;
+	else { // move up
+		while (!bitmap.isEmptyLine(y1)) y1 --;
+		y1 ++;
+	}
 
-    //check if train 
-    if (!config.train)
-        this.train = false;
-    else
-        this.train = true;
+	//find bottom-line
+	var yB = p2.y;
+	if (yB > bottom)
+		yB = bottom;
+	else if (bitmap.isEmptyLine(yB)){
+		while (bitmap.isEmptyLine(yB) ) yB--;
+		while (!bitmap.isEmptyLine(yB)) yB --;
+		yB++;
+	}else {
+		while (!bitmap.isEmptyLine(yB)) yB --;
+		yB++;
+	}	
+//	alert(yB + ', ' + y1)
+	if (yB == y1) {  //same line
+		//alert('same line');
+		y2 = bitmap.findNextEmptyLine(y1);
+		x1 = p1.x < p2.x ? p1.x : p2.x;
+		x2 = p1.x + p2.x - x1;
+		
+		console.log(p2.x - p1.x)
+		if ( p1.x < left)
+			x1= bitmap.findEmptyCol(left,y1,y2,0);
+		else
+			x1 = bitmap.findEmptyCol(x1,y1,y2,0);
+		if (p2.x > right)
+			x2 = bitmap.findEmptyCol(right,y1,y2,1);
+		else
+			x2 = bitmap.findEmptyCol(x2,y1,y2,1);
 
-    //check enabled
-    if (config.disable === true)
-        this.enabled = false;
-    else
-        this.enabled = true;
+		if (x1 < x2 ){
+			var o = {x: x1, y: y1, w: x2 -x1 +1, h: y2 - y1 + 1};
+			that.hlSet.push(o);
+		}
+		goo.Highlight(that.hlSet);	  
+		return;
+	}
+	else {  //not in same line
 
-    this.context.fillStyle="rgba(0,0,0,0)";
-     this.context.lineWidth = "4";
+		//add top line
+		y2 = bitmap.findNextEmptyLine(y1);
+		if ( p1.x < left)
+			x1= bitmap.findEmptyCol(left,y1,y2,0);
+		else
+			x1 = bitmap.findEmptyCol(p1.x,y1,y2,0);
+		x2 = bitmap.findEmptyCol(right,y1,y2,1);
+		if (x1 < x2 && y2 - y1 >2) {
+			var o = {x: x1, y: y1, w: x2 -x1 +1, h: y2 - y1 + 1};
+			that.hlSet.push(o);
+		}
 
-    //! quan trong - to mau trang voi toan bo vung nhap
-    this.context.fillRect(0,0, config.container.width, config.container.height);
-    this.privCanvas = config.container.privCanvas;
-    this.privContext = config.container.privContext;
+		y1 = bitmap.findNextEmptyLine(y2 + 1);
+		y2 = bitmap.findNextEmptyLine(y1);
+		//add next full-length line
+		while (y1 < yB) {		
+			x1 = bitmap.findEmptyCol(left, y1, y2, 0);
+			x2 = bitmap.findEmptyCol(right, y1, y2, 1);
+			var o = {x: x1, y: y1, w: x2 -x1 +1, h: y2 - y1 + 1};
+			that.hlSet.push(o);
+			y1 = bitmap.findNextEmptyLine(y2 + 1);
+			y2 = bitmap.findNextEmptyLine(y1 + 1);
+		
+		}
+		
+		//add last line
+		y2 = bitmap.findNextEmptyLine(y1);
+		x1 = bitmap.findEmptyCol(left, y1, y2, 0);
 
-    //set size
-    this.width = config.container.width;
-    this.height = config.container.height;
-
-    //set number of lines
-    if (config.line)
-        this.nLine = config.line;
-    else
-        this.nLine = 1;
-
-    //display guide
-    if (config.guide) {
-        this.guide = true;
-    }
-    else 
-        this.guide = false;
-    
-    //store current character ......
-    //this.current= null;
-    //this.empty = false;
-   
-    //undo/redo flags
-    this.u = false;
-    this.r = false;
-    // check if canvas is cleared
-    this.cleared = false;
-
-    this.currentImg = null;
-    //sample list
-    this.sampleList = [];
-
-    //store bound rect of each char
-    this.input = new Array( this.nLine);
-    for (var i=0; i< this.input.length; i++)
-        this.input[i] = new Array();
-
-
-    // output data
-    this.output = new Array(this.nLine);
-     for (var i=0; i< this.output.length; i++)
-        this.output[i] = new Array();
-  
-    // store information for undo/redo
-    this.undo = new Array();
-    this.undoData = new Array();
-   
-    //store redo data
-    this.redo = new Array();
-    this.redoData = new Array();
-  
-   
-    //luu tru gioi han cua net chu tam thoi
-    this.left =0;
-    this.right = 0;
-    this.top = 0;
-    this.bottom = 0;
-
-    //luu tru vi tri con tro phia truoc
-    this.prevX = 0;
-    this.prevY = 0;
-
-    //bien kem tra 
-    this.enableDraw = false;
-
-    //timer id
-    this.timeId = null;
-    
-    //delay event
-    if (typeof config.delay == "Number")
-        this.delay = config.delay;
-    else
-        this.delay = 100;
-
-    //net 
-    this.net = null;
-    //map character
-    this.map = null;
-
-    //preload
-    this.preload();
-
-    //error ?
-    this.enable();
-    this.addEvent();
-    this._target.value = "";
-
-    this.loaded = false;
-    this.showGuide();
+		x2 = p2.x;
+		if (x2 > right)
+			x2 = bitmap.findEmptyCol(right, y1, y2, 1);
+		else
+			x2 = bitmap.findEmptyCol(x2, y1, y2,1);
+		if ( x1 < x2   && y2 - y1 >2){
+			var o = {x: x1, y: y1, w: x2 -x1 +1, h: y2 - y1 + 1};
+			that.hlSet.push(o);
+		}
+	//	goo.Highlight(that.hlSet);   //highlight
+	
+	}
 };
-/** 
- *  Constant of Entry object
- *
+/**
+ * Seperate character
  */
-Ocr.Entry.prototype.const = {
-    SAMPLEWIDTH: 10,
-    SAMPLEHEIGHT: 14,
-    HANDWRITING : [
-    "A:00000011000000011000000001110000001111000001100100000110010000110001100111111111011001111101100000111100000011110000000110000000011000000001",
-    "A:00001100000000110000000011000000011110000001111100000111111111111111111111111111011100110001100001100110000110110000011011000000100000000000",
-    "A:00000110000000011000000011100000001110000000111000111110100011111111000011111111001100111100110011000010001100011000110001100011000000000100",
-    "A:00011100000000110000000011000000001110000000111000000011100000001011000000100110111111111100010111100001000010000100001100010000010000000001",
-    "A:00101000000011100000000100000000010000000011100000001110000000101100001110010000111111111101100110000100011000010000100001000010000000001100",
-    "A:00000110000000011000000011100000001110000001101100000110110000111111110111111111011000111001100001101110000110110000001111000000110000000000",
-    "B:01111100000110011110001000001100100000010110000001011000011101111111000111111100110000011011000000111100000001100000001110000011101111111100",
-    "B:00111110000111111100011101110000110011000011011100001111100001111111100011111110011100011101100000110110000011011001111111111111000110000000",
-    "B:01111100000011111100000111111000011001100001101110000111110000011111000001111110000110011100011000110001000011001100111111111111101111111000",
-    "C:00111111000111111100111000000011000000001100000000110000000010000000001000000000100000000011000000001100000000110000000011111111110111111111",
-    "C:00011111110111110000011100000011100000001110000000110000000010000000001000000000100000000011000000001111000000011110000000111110000000111000",
-    "C:00111111100111001111111100000111000000001100000000100000000010000000001000000000110000000011000000001110000000011100000001111110000001111000",
-    "C:00111111100111000110011000000011000000001100000000100000000010000000001000000000100000000010000000001000000000110000000101110011110011111110",
-    "C:00001111100001111111001110001111110000001110000000110000000010000000001000000000100000000010000000001100000000110000000011111111100011111110",
-    "D:10000000001111111100100000111010000001111000000011100000001110000000011000000001100000000110000000011000000001100000001111111111101001111100",
-    "D:00111111000001001110000100011100010000110011000011001100001100110000110011000011001100001100110001110010000110011111110011111111001110000000",
-    "D:01111100000111111100001101111000110001100011000011001100001100110000110011000011001100011100011011110001101110111111110011111100000001100000",
-    "D:11111110001110011100011000111001100001100110000011011000001101100000010110000001011000000101100000110110001111111111111011111100000110000000",
-    "D:01110000000111110000001111110000110011100011000110001100011100110000110011000011001100001100110000110011000111001111111011111111001111000000",
-    "E:11111000001111111111110000011111000000001100000000111000000011111100001111110000110000000011000000001100000000110000000011111111101111111110",
-    "E:11111111000111111100011000000001100000000110000000111100000011111111000110111100011000000001100000000110000000011000000001111111100001110000",
-    "E:11111110000110001111010000001101000000001100000000110000000011000000001111111000110000000010000000001000000000100000000010000000001111110000",
-    "E:01111000000111111110011011111001100000000110000000111000000011111110001111111000110000000011000000001100000000110000000011111111000111111100",
-    "E:11111100000111111111001100011100110000000011000000011100000001111111100011000000001100000000110000000011000000001100000011110000000011111110",
-    "E:01111000000100111110010000011001000000000100000000010000000011111111000100000000010000000011000000001100000000100000000011111111111111100000",
-    "E:11111100000111111110011001111001100000000110000000011000000011111110001111111100011000000001100000000110000000011000000001111111100011111110",
-    "E:01111111101110000000010000000001000000000100000000010000000001001110001111110000010000000001000000001100000000110000000011000011111111111110",
-    "E:00111111111111000000001000000000100000000010000000010000001001111111100100000000110000000011000000001100000000100000000010000001101111111000",
-    "F:01111111001111111110111000001011100000001110000000111000000011111111001111111100110000000011000000001100000000110000000011000000000000000000",
-    "F:11111000001111111111110011111111000000001100000000110000000011111100001111110000110000000011000000001100000000110000000011000000000000000000",
-    "F:00110000001111100000101111111100100000000010000000111100000001111110000110000000010000000001000000000100000000110000000010000000001000000000",
-    "F:11111111111001011111000100000000010000000001000000000111111100010000000001000000000100000000010000000001000000000100000000110000000011000000",
-    "F:11111111100110011110011000000001100000000110000000111000000011111111100100000000010000000001000000000100000000010000000001000000000000000000",
-    "F:11111111111100000000110000000011000000001100000000110000000011111110001111111000110000000011000000001100000000110000000011000000001100000000",
-    "G:00001111000011110000011100000011110000001110000000110000000010001111001000111111110011111111000001101110000110111100111001111111000011111000",
-    "G:01111111000111011100111000000011000000001100000000110000000010000001101000011111110001111111000011101110001100111001110001111111000011111100",
-    "H:01100001100110000111011000001101100000110110000111011000011011111111100111111110011000011001100001100110000110011000011001100001100110000000",
-    "H:01100001000110000100001000011000100001100010000110001000011011111111111111111111001100011000110001100011000110001100011000110001100000000110",
-    "H:00000011000010001100001000010000100001000010000100001000010011111111111111111111011000010001100001000110000110011000011001100001100000000110",
-    "H:01100000000110000011011000001101100000111110000111111000011011111001101111111110110001111011000001101100000110110000111011000011000000001100",
-    "H:01100000100110000010011000001001100000100110000010011111111001111111101110000010110000001011000000101100000010110000001011000000101000000000",
-    "H:00000001100011000110001100011000110001100011000110001100011011111111100110111111011000011101100001100110000110111000011011000001101100000110",
-    "H:01001100000100110000010011000001001100000100110000111111000011111100000100110000010011000001001100000100110000000001000000000000000000000000",
-    "I:01111111000001111100000011000000001100000000110000000011000000001100000000110000000011000000001100000000110000111111111011111111100000000000",
-    "I:00111111110011110000000011000000001100000000010000000001000000000100000000010000000001000000000100000000010000111111111100000100000000010000",
-    "I:11111110000111111100000001110000000110000000011000000001100000000110000000011000000001100000000110000000011000000001100001111111110111100000",
-    "I:11111111110000100000000010000000001000000000100000000010000000001000000001100000000100000000010000000001000000000100000001111111100001000000",
-    "I:11111111000111111110000001011000000100000000010000000001000000000100000000110000000011000000001100000000110000111111111011111111100000100000",
-    "I:00001000001111111100111111111000001001100000100000000010000000001000000000100000000010000000001000000000100000011111111111111111111100100000",
-    "I:11111100000001111100001110000000111000000001111100000001110000000111000000011100000001110000000111000000011100000001110000000111000000011110",
-    "J:11111011111111111111000011111000000011000000000100000000010000000001000000000100000000010000000001001100001100110001110011111110000111110000",
-    "J:11111000000111111111000001111100000011000000001100000000110000000011000000001100000000110000000110000000011000100111000011111000000111000000",
-    "J:11111111110111111111000001100000000110000000011000000001100000000110000000011000000001100000000100000000110000110011000011111100001111100000",
-    "J:01111110000111111111000001111100000110000000011000000001100000000110000000011000000001100000000110000000011000000001100011111100001111110000",
-    "K:11000001111100001110110001111011011110001111110000111100000011000000001110000000111100000011111100001100111100110001111011000001111100000000",
-    "K:01100000000110011000011011100001111100000111100000011100000011100000001110000000111110000001111100000110110000011001110001000011000000000000",
-    "K:01100000000100000110010000111011001111001101111000111110000011100000001100000000111100000011111100001000111100110001111010000001111000000001",
-    "L:11100000001110000000111000000011100000001110000000111000000011100000001110000000111000000011000000001100000000110000000011111111101111111110",
-    "L:11000000001100000000110000000011000000001100000000110000000011000000001100000000110000000011000000001100000011110000011111111111111111111100",
-    "L:11100000001110000000011000000011100000001110000000110000000011000000001100000000110000000011000000001100000000110000000011111111111111111111",
-    "L:00000110000000110000000010000000001000000000100000000010000000001000000000100000000010000000001000000000100000000110000011110000011111111111",
-    "L:11000000001100000000110000000011000000001110000000111000000001100000000110000000011000000001100000000110000000011000000001111111110111111111",
-    "M:10000001101100000110111000011011100011101111001110111100111011110011101101101011110110101111011110111100111011110011100100001110000000010000",
-    "N:11000000001100000011111000001111100000111111000011111110001111011000101101110010110011101011000110101100011110110000111011000011100000000110",
-    "N:01100000000110000010011100001001111000100111100110011111011001101101101110110110111001111011000111101100001110110000111011000011101100000100",
-    "O:00111111000110000110110000001110000000011000000001100000000110000000011000000001100000000110000000011100000011110000001101100001100011111100",
-/*trai tim */
-    "O:11110111111111111111110111101111001100111000000011100000001110000000111100000110110000011011100011100111011100001111100000011100000000100000",
-    "P:11111111101100000011100000000110000000011000000001100000000110000000111111111110111110000010000000001000000000100000000010000000001000000000",
-    "P:11111111101111111111011000001101100000110110000011001100001100111111110111111000001100000000110000000011000000011100000001100000000110000000",
-    "P:00010000000011000000111111111100100000010010000011001000011001101111000111110000010000000001000000001100000000110000000011000000001000000000",
-    "P:00010000000001000000111111111011110000110011000001001000000100100001110010011100111111000001100000000100000000010000000001000000001100000000",
-    "P:11111111111100000011110000001111000000011100000011110000001111000011101111111100110000000001000000000100000000010000000001000000000100000000",
-    "P:11111110000111111110001110111100110000110111000011011100111111111111101111100000011000000011100000001110000000110000000011000000001100000000",
-    "Q:00111111000110000100011000011011000000101000000010100000001110000000111000000001100000001110001000111000111010110000111011100011100011111111",
-    "Q:00111110000110011100110000110010000001101000000010100000001010001000101000110010100001101010000011101100000110110000011101000011110011111001",
-    "R:11111111001100001110110000011011000000101100000110110111110011111100001110000000111110000011011110001100011100110000111011000001111100000001",
-    "S:00011111100001100000001100000000100000000010000000001000000000111000000000111110000000001100000000010000000001000000000110000001111111111100",
-    "S:00011111000011111100001110010001110000000111000000011000000001110000000011111100000111111100000001110000000111000000011111111111101111111100",
-    "S:00001111110001111111000110000000011000000001100000000110000000011111000001111110000000111000000001100000000011000000011111111111101111111100",
-    "S:01111110000100001000110000000011000000001000000000111000000001111111110000000011000000000100000000010000000001000000001100000001101111111100",
-    "S:00011111000011111100001100000000110000000011000000001110000000111111100000111111000000011100000000110000000011110000011111111111110111111110",
-    "T:11111111110000110001000011000000001100000000110000000011000000001100000000110000000011000000000100000000010000000011000000001100000000110000",
-    "T:11111111111111111111000011000000001100000000110000000011000000001100000000110000000011000000001100000000110000000011000000001100000000000000",
-    "T:01111111111111111111111011000000001100000000110000000011000000001100000000110000000011000000001100000000110000000011000000001100000000000000",
-    "T:11111100001111111100000011111100001101110000110000000011000000001100000001110000000110000000011000000001100000000110000000011000000001100000",
-    "T:11111100001111111111000111111100001100000000110000000011000000001100000000110000000011000000001100000000110000000011000000001100000000110000",
-    "U:11100000001100000011110000001111000000111100000011110000011111000001111100001111110000111111000011111100011111111001111001111111100111110000",
-    "U:01100000000110000001011000000101100000010100000001110000000111000000011100000001110000000111000000011000000001100000000110000000111111111111",
-    "U:00000000111100000011110000001111000000111100000011110000011111000001111100000111110000011111000001111100001111110001111111111110110011110011",
-    "U:10000011001000001100100000110010000011001000001100100000110010000111001000011100100011110010011111001111111100111100111101110011110000001110",
-    "V:11000000111100000011110000011111100001100110000110011000111001100011000111001100001101100000110110000011111000000111000000011100000001100000",
-    "V:10000000011000000001110000000111000000110110000010011000011000110001000001000100000100110000011011000001101000000011100000001100000000110000",
-    "W:10000000001000000001110000001111000000111100100011110111001111011100111101110110010111111001110111100111011110011100111001110011000010001100",
-    "X:01100000010110000011001000001100110001100001101100000110100000001110000000111000000011100000011011000011001100011000010011000001101000000011",
-    "X:11000000001110000011011100011101111001110001101110000111110000001111000001111000001111110001111011001110001110110000011011000001101100000100",
-    "X:00100000110011000010001100011000011011000001111000000011100000001100000000110000000111100000110110000010001000111000110011000011001000000000",
-    "Y:11100000111111000011011100011100111011100001111100000111110000001110000001110000001110000000111000000111000000111000000011100000001100000000",
-    "Y:11000000111100000111011000011000110011000011011000000111100000001100000000110000000010000000011000000011000000001100000001100000000110000000",
-    "Z:01111111110111111111000000011100000011100000011110000001110000001110000001110000001111000001111000000111000000111000000011111111111111111111",
-    "O:00111110000111111110111000111111000000111100000011110000000111000000011000000001100000001111000000111100000011110000001111111111101111111110"
-   ]
+tool_proto.separateChar = function(includeSpace){
+
+	var totalSpace = 0;
+	nSpace = 0;
+
+	var hlSet = [];
+	var bitmap = this.bitmap;
+	var x1,x2, y1, y2,xR, yB;
+	var n = 0;
+	var startIndex = -1;
+	var maxW = 0;
+	for (var i =0,len = this.hlSet.length ; i < len; i++){
+		var block = this.hlSet[i];
+		x1 = block.x;
+		xR = x2 = block.x + block.w -1;
+		yB = y2 = block.y + block.h -1;
+		startIndex = hlSet.length;
+		while (x1 < xR) {
+
+			y1 = block.y;
+
+			y2 = block.y + block.h -1;
+			x2 = bitmap.findNextCol(x1,y1,y2,0);
+			//alert(bitmap.isEmptyCol(x1,y1,y2))
+			//alert(x1 + ", " + x2)
+			//while (bitmap.isEmptyLine(y1,x1, x2)) y1++;
+
+			while (bitmap.isEmptyLine(y2,x1, x2)) y2--;
+			var o = {x: x1 -0, y: y1, w: x2 -x1 +1, h: y2 - y1 + 1};
+			hlSet.push(o);
+			//alert('test')
+			x1 =  bitmap.findNextCol(x2 + 1,y1,y2,0);
+			if (includeSpace && x1 -x2 >= 0.6 * o.w) { //push space
+				hlSet.push({space: true});
+				//alert('add space')
+			}
+		}
+		if (includeSpace) {
+			hlSet.push({line: true});	
+			n ++ ;
+		}
+	}
+	// alert('line ' + n)
+	//goo.Highlight(hlSet);
+	this.hlSet = hlSet;
+};
+tool_proto.normalizeCharacterSet = function(){
+	for (var i=0; i< this.hlSet.length; i++){
+		this.hlSet[i] = goo.Bitmap.resize(this.hlSet[i]);
+		//alert(' test')
+	}
 };
 
+tool_proto.test = function(){
+	var bitmap = this.bitmap;
+	goo.privContext.clearRect(0,0, bitmap.width, bitmap.height);
+	for (var i=0; i< this.hlSet.length; i++){
+		var o = this.hlSet[i];
+		//alert(o.x)
+		var matrix = goo.Bitmap.resize(bitmap.getBitmap(o));
+		//alert(matrix)
+		goo.drawImage(matrix, o.x, o.y,true);
+	}
+};
+tool_proto.getData = function(){
+	var bitmap = this.bitmap;
+	var out = [];
+	goo.privContext.clearRect(0,0, bitmap.width, bitmap.height);
+	var hlSet = this.hlSet;
+
+
+	for (var i=0; i< this.hlSet.length; i++){
+		var o = this.hlSet[i];
+		//alert(o.x)
+		if (o.space) {
+			//alert('space include');
+			out.push(' ');
+		}
+		else if (o.line) {
+			out.push(" \n");
+			//alert('line')
+		}else {
+			var matrix = goo.Bitmap.extractFeature(bitmap.getBitmap(o));
+			out.push(matrix);
+		}
+	}
+	//alert('out length ' + out.length
+	return out;
+};
+/**
+ * goo.HighLight
+ * o {object} o.x : left coordinate
+ *			  o.y : top y coordinate
+ * 			  o.w : width of rectangle
+ * 			  o.h : height of rectangle
+ */
+goo.Highlight = function(set){
+	//console.log('highlight');
+	goo.UnHighLight();
+	for (var i=0; i< set.length; i++){
+		var o = set[i];
+		var ele = document.createElement('div');
+		ele.className="highlight";
+		ele.style.height = o.h + "px";
+		ele.style.left = o.x + "px";
+		ele.style.top = o.y + "px" ;
+		ele.style.width = o.w + 'px';
+		
+		goo.hlContainer.appendChild(ele);
+	}
+	
+	
+}
+/**
+ * goo.UnHighLight {function}
+ */
+goo.UnHighLight = function(){
+	goo.hlContainer.innerHTML = "";
+}
+/**
+ * goo.OCRTool object
+ */
+goo.OCRTool = function(containerId,onload){
+	this.isReady = false;
+	this.result = "";  //result text
+	var img = new Image();
+	var that = this;
+	img.onload = function(){
+		goo.Initialize(containerId,img.width, img.height); 
+		var bitmap = new goo.Bitmap(img);
+		bitmap.addHighlightTool();
+		bitmap.tool.separateLine(new Point(0,0), new Point(img.width -1 , img.height - 1));
+		bitmap.tool.separateChar();
+		//goo.Highlight(bitmap.tool.hlSet)
+		//get data
+		//this.data = bitmap.tool.getData();
+		that.preload(bitmap.tool.getData());
+
+	}
+	img.src = "images/data6.png";
+	
+	this.onload = onload;
+	this.sampleList = [];
+	this.net = null;
+	this.map = null;
+	this.requireTrain = true;
+	this.text = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789(),.'; //--> todo
+};
+var OCRTool_proto = goo.OCRTool.prototype;
+OCRTool_proto.addClipboard = function(clip){
+	this.clip = clip;
+};
 /* 
  * Preload Data
  */
-Ocr.Entry.prototype.preload = function(){  
+OCRTool_proto.preload = function(data){  
     //alert("preload");
-
-    var HANDWRITING = this.const.HANDWRITING;
-    for (var i=0; i< HANDWRITING.length; i++){
-        var line = HANDWRITING[i];
-        var ds = new SampleData(line[0], this.const.SAMPLEWIDTH, this.const.SAMPLEHEIGHT);
-        this.sampleList.push(ds);
-        var index = 2;
-        for (var x=0; x < ds.getHeight(); x++){
-            for (var y=0; y <ds.getWidth(); y++ ){
-                ds.setData(x, y, line[index++]=='1' ? 1 : 0);
-            }
-        }
-
+  alert(this.text.length + ',' + data.length)
+    for (var i=0,len = data.length; i< len; i++){
+  		var ds = new SampleData(this.text[i],goo.config.SAMPLEWIDTH, goo.config.SAMPLEHEIGHT); // size 10x14
+  		//alert(this.text[i]);
+  		ds.grid = Matrix.clone(data[i])
+  		this.sampleList.push(ds);
+  		
     }
+   // alert(this.sampleList.length)
+    // var HANDWRITING = this.const.HANDWRITING;
+    // for (var i=0; i< HANDWRITING.length; i++){
+    //     var line = HANDWRITING[i];
+    //     var ds = new SampleData(line[0], this.const.SAMPLEWIDTH, this.const.SAMPLEHEIGHT);
+    //     this.sampleList.push(ds);
+    //     var index = 2;
+    //     for (var x=0; x < ds.getHeight(); x++){
+    //         for (var y=0; y <ds.getWidth(); y++ ){
+    //             ds.setData(x, y, line[index++]=='1' ? 1 : 0);
+    //         }
+    //     }
+
+    // }
     //train
     this.train_actionPerformed();
+
+    if (this.onload && typeof this.onload == 'function') 
+    	this.onload();
 
 };
 
 /**
  * Traing action performed
  */
-Ocr.Entry.prototype.train_actionPerformed = function(){
+OCRTool_proto.train_actionPerformed = function(){
     var sampleList = this.sampleList;
 
-    var inputCount = this.const.SAMPLEWIDTH * this.const.SAMPLEHEIGHT;
+    var inputCount =goo.config.SAMPLEWIDTH * goo.config.SAMPLEHEIGHT;
     var outputNeuron = sampleList.length; //so luong ky tu huan luyen
 
     var set = new TrainingSet(inputCount, outputNeuron);
@@ -772,7 +1058,7 @@ Ocr.Entry.prototype.train_actionPerformed = function(){
         var ds = sampleList[t];
         for (var x=0; x<ds.getHeight(); x++){
             for (var y = 0; y<ds.getWidth(); y++){
-                set.setInput(t, idx++, ds.getData(x,y)? 0.5 : -0.5);
+                set.setInput(t, idx++, ds.getData(x,y));
             }
         }
     }
@@ -782,7 +1068,7 @@ Ocr.Entry.prototype.train_actionPerformed = function(){
 
     //check 
     var that = this;
-    if (!this.train){
+    if (!this.requireTrain){
         console.log("not train");
         that.map =["X","C","E","T","E","H","W","A","H","D","C","T","I","B","P","T","A","H","Q","P","C","M","T","B","Y","J","C","O","E","D","K","A","P","Y","L","D","D","P","P","S","B","E","F","U","S","F","E","E","J","F","O","H","H","I","F","J","J","A","T","U","S","N","D","G","K","N","V","O","I","G","Q","S","L","X","L","X","E","I","L","H","V","R","A","I","H","P","L","F","E","I","K","E","C","U","Z","F","A","I","S","U"];
         that.net.outputWeights=[[-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0],[-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0],[-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0],[-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0],[-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0],[-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0],[-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0],[0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0],[0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0],[0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0],[-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0],[-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0],[-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0],[-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0],[-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0],[-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,-0.0845,0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0],[-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0],[-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0],[-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0],[0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0],[-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0],[0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0],[0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0],[-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0],[-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0],[-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0],[-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0],[-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0],[-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0],[-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0],[-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0],[0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0],[-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,0],[-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,-0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,-0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0.0845,0]];
@@ -790,702 +1076,85 @@ Ocr.Entry.prototype.train_actionPerformed = function(){
     //train
     else {
         this.net.learn();
-         this.map = this.mapNeurons();
+        this.map = this.mapNeurons();
     }
     //map neuron
    
-    console.log("train success");
+  // alert(this.map);
 };
 /**
  * Recognize action performed
  *
  */
-Ocr.Entry.prototype.recognize_actionPerformed = function(){
-    this._target.value = "";
+OCRTool_proto.recognize_actionPerformed = function(){
+
+	//get data
+	var tool = this.img.tool;
+	tool.separateChar(true);
+	var data = tool.getData();
+
     if (this.net == null) {
         alert("I need to be trained first");
-        return;
+        return "";
     }
 
-    var result = "";
-    var size = this.const.SAMPLEWIDTH * this.const.SAMPLEHEIGHT;
+    this.result = "";
 
-    for (var line=0; line< this.nLine; line++) {
-        var row = this.output[line];
-        var row2 = this.input[line];
-        for (var index = 0; index < row.length; index++ ){
-          var t = row[index];
-          if (index > 0 && (row2[index].x - row2[index-1].x )>= 1.5 * (row2[index-1].h))   //khoang cach  = 1.6 
-               result += " ";
-          var input = new Array(size);
-          var idx = 0;
-          for (var i=0; i< t.length; i++){
-              for (var j=0; j< t[0].length; j++){
-                  input[idx++]= t[i][j];
-              }
-          }
-           
-          var normfac = new Array(1);
-          var best = this.net.winner(input, normfac);
-         // var map = this.mapNeurons();
-          result += ""+ this.map[best];
-        }
-        result += "\n";
+    for (var i=0; i< data.length; i++) {
+       	if (typeof data[i] == 'string') {
+       		this.result +=data[i];
+       		//if (data[i] == " \n") alert('new line')
+       		//alert('t'+ data[i] + 't')
+       	}else {
+	        var input = Array.concat.apply(null, data[i]); //convert 2d array to 1d array
+	        var normfac = new Array(1);
+	        var best = this.net.winner(input, normfac);
+	        // var map = this.mapNeurons();
+	        this.result += ""+ this.map[best];
+       }
     }
-    this._target.value = result;
+    if ( this.clip) //has clipboard
+    	this.clip.setText(this.result);
+   	//alert(this.result)
 };
+OCRTool_proto.getResult = function(){
+	return this.result;
+}
+OCRTool_proto.setImage = function(img){
 
+	this.img = new goo.Bitmap(img, true);
+	this.img.draw();
+//	this.img.addOCRTool(this);
+	this.img.addHighlightTool();
+
+}
 /* *
  *  Map neurons
  */
-Ocr.Entry.prototype.mapNeurons = function(){
+OCRTool_proto.mapNeurons = function(){
     var map = new Array(this.sampleList.length);
+
     var normfac = new Array(1);
     //normfac[0] = 0;
     for (var i=0; i<map.length; i++)
         map[i] = '?';
 
-    var size = this.const.SAMPLEWIDTH * this.const.SAMPLEHEIGHT;
+    var size = goo.config.SAMPLEWIDTH * goo.config.SAMPLEHEIGHT;
 
     for (var i=0; i< this.sampleList.length; i++){
         var input = new Array(size);
         var idx = 0;
         var ds = this.sampleList[i];
         for (var x = 0; x < ds.getHeight(); x++) {
-                for (var y = 0; y < ds.getWidth(); y++) {
-                    input[idx++] = ds.getData(x, y) ? .5 : -.5;
-                }
+            for (var y = 0; y < ds.getWidth(); y++) {
+                input[idx++] = ds.getData(x, y);
             }
+        }
 
-            var best = this.net.winner(input, normfac);
-            map[best] = ds.getLetter();
-            //alert(map[best]);
+        var best = this.net.winner(input, normfac);
+        map[best] = ds.getLetter();
+       // alert(map[best])
     }
+   // alert(map);
     return map;
 }
-/**
- * addEvent Listener
- *
- */
-Ocr.Entry.prototype.addEvent = function(){
-    var that = this;
-    this.enableDraw = false;
-    this.context.strokeStyle="#00ff00";
-    this.context.lineWidth = "4";
-    //this.context.lineWidth = 3;
-    this.canvas.addEventListener("mousedown", that.eventCatch);
-    this.canvas.addEventListener("mouseup", that.eventCatch);
-    this.canvas.addEventListener("mousemove",   that.eventCatch);
-    
-    
-    that.eventCatch = function(e){
-        if (that.enabled){
-             if ( e.type == "mousedown"){
-                //first 
-                if (!that.loaded){
-                    console.log("load");
-                    that.loaded = true;
-                    that.showGuide();
-                    that.context.strokeStyle = "#00ff00";
-                }
-                that.cleared = false;
-                that.u= false;
-                that.r = false;
-                that.enableDraw = true;
-                
-                //clear prev time event
-                if (that.timeId != null)
-                    clearTimeout(that.timeId);
-
-                that.prevX = e.clientX - that.canvas.parentNode.offsetLeft;
-                that.prevY = e.clientY - that.canvas.parentNode.offsetTop;
-                
-                that.left = that.prevX;
-                that.right = that.prevX;
-                that.top = that.bottom = that.prevY;
-
-                }else if (e.type == "mouseup"){
-                    that.enableDraw = false;
-                    that.addChar(that.left-2, that.top-2, that.right+2, that.bottom+2);
-                    if (that.timeId != null){
-                        clearTimeout(that.timeId);
-                        that.timeId = setTimeout(function(){
-                            that.recognize_actionPerformed();
-                        }, 300);
-                }else{
-                    //alert(typeof that.recognize_actionPerformed);
-                    that.timeId = setTimeout(function(){
-                        that.recognize_actionPerformed();
-                    }, 300);
-                }
-                ///that.test();
-                //set event
-                // that.timeId = setTimeout(function(){
-                    
-                //      //test
-                //      that.test();
-                // }, that.delay);
-                
-            }else if (e.type == "mousemove"){
-                if (that.enableDraw){
-                    var x = e.clientX - that.canvas.parentNode.offsetLeft;
-                    var y = e.clientY - that.canvas.parentNode.offsetTop;
-
-                    that.context.beginPath();
-                    that.context.moveTo(that.prevX, that.prevY);
-                    that.context.lineTo(x, y);
-                    that.context.stroke();
-                    that.context.closePath();
-                    
-                    
-                    that.prevX = x;
-                    that.prevY = y;
-
-                    //cap nhat vung bao
-                    if (x < that.left)
-                        that.left = x;
-                    else if ( x > that.right)
-                        that.right = x;
-                    
-                    if (y < that.top)
-                        that.top = y;
-                    else if ( y > that.bottom)
-                        that.bottom = y;
-                }
-            }
-        }
-
-       
-    }
-};
-/**
- * Remove event listener
- *
- */
- Ocr.Entry.prototype.removeEvent = function(){
-    var that = this;
-    //this.canvas.removeEventListener("mousedown", that.eventCatch);
-    //this.canvas.removeEventListener("mouseup", that.eventCatch);
-   // this.canvas.removeEventListener("mousemove",   that.eventCatch);
-    this.canvas.onmousedown = null;
-    this.canvas.onmouseup = null;
-    this.canvas.onmousemove = null; 
-};
- Ocr.Entry.prototype.enable = function(){
-    this.enabled = true;
-    this.addEvent();
-    
- };
- Ocr.Entry.prototype.disable = function(){
-    //this.removeEvent();
-    this.enabled = false;
- };
- Ocr.Entry.prototype.toggle = function(){
-    if (this.enabled)
-        this.disable();
-    else
-        this.enable();
- }
-Ocr.Entry.prototype.clear = function(){
-    this.context.clearRect(0,0, this.width, this.height);
-      this.context.fillStyle="rgba(0,0,0,0)";
-    this._target.value = "";
-
-
-    // reset
-    this.input = new Array( this.nLine);
-    for (var i=0; i< this.input.length; i++)
-        this.input[i] = new Array();
-
-    this.output = new Array(this.nLine);
-     for (var i=0; i< this.output.length; i++)
-        this.output[i] = new Array();
-    // //kiem tra undo/redo
-    this.cleared = false;
-    this.showGuide();
-
-    
-
-
-    // luu tru thong tin phuc vu undo va redo
-    this.undo = new Array();
-    this.undoData = new Array();
-   
-    //store redo data
-    this.redo = new Array();
-    this.redoData = new Array();
-    
-};
-Ocr.Entry.prototype.getData = function(x, y, width, height){
-    
-    var input = new Array(height);
-    for (var j=0; j< height; j++)
-        input[j] = new Array(width);
-    
-    var index = 0;
-    var img = this.context.getImageData(x, y, width, height);
-    img = img.data;
-
-    var index = 1;
-    for (var i=0; i< height; i++){
-        for (var j=0; j< width; j++){
-            if (img[index] >0)
-                input[i][j] = 0;
-            else 
-                input[i][j] = 255;
-            index+=4;
-        }
-    }
-    var out = this.normalize(input);
-    
-    
-   /* var s = "";
-    for (var i=0; i<out.length; i++) {
-        for (var j=0; j< out[0].length; j++){
-            s +=( out[i][j] == 0 ? "0" : "1");
-
-        }
-    }
-    console.log(s);*/
-
-    return out;
-   
-};
-Ocr.Entry.prototype.addChar = function(xL, yT, xR, yB){
-    var t = {x: xL, y: yT, w: xR- xL +1, h: yB -yT +1};
-    var x, y, w, h;
-    var targetLine = -1;
-    var that = this;
-    for (var r =0; r < this.nLine; r++){
-        //var line = Math.floor((yT+yB)*0.5/(this.height/this.nLine));
-        var line = r;
-        //alert(line);
-        var rIn=this.input[line];
-        var rOut = this.output[line];
-        for (var i= rIn.length-1; i>=0; i--){
-          
-            if ( rIn[i]!= null && this.collide(t, rIn[i], i)){
-                targetLine = line;
-                x = rIn[i].x < t.x ? rIn[i].x : t.x;
-                y = rIn[i].y < t.y ? rIn[i].y : t.y;
-                w = rIn[i].x + rIn[i].w > t.x + t.w ? rIn[i].x + rIn[i].w -x +1: t.x + t.w - x+1;
-                h = rIn[i].y + rIn[i].h > t.y + t.h ? rIn[i].y + rIn[i].h -y +1: t.y + t.h - y+1;        
-                
-                t.x = x;
-                t.y = y;
-                t.w = w;
-                t.h = h;
-                //console.log("after : "+ t.x +"," + t.y + "," + t.w + "," + t.h);
-                rIn.splice(i, 1);
-                rOut.splice(i,1);
-              
-               
-            }
-        }
-    }
-    chr = this.getData(t.x, t.y, t.w, t.h);
-    if (targetLine == -1)
-        targetLine = Math.floor((yT+yB)*0.5/(this.height/this.nLine));
-    this.put(targetLine,chr,t);
-
-    this.undo.push(this.copy(this.input));
-    var newData = this.canvas.toDataURL("image/png"); //--> url anh luu tru canvas
-    this.currentImg = newData;
-    this.undoData.push(newData);
-  
-    
-};
-Ocr.Entry.prototype.copy = function(arr){
-   
-    var t= new Array(arr.length);
-    for (var i=0; i< arr.length; i++){
-        t[i] = new Array();
-        t2 = arr[i];
-        for (var j=0; j< t2.length; j++){
-            t[i].push({x: t2[j].x, y: t2[j].y, w: t2[j].w, h: t2[j].h});
-        }
-    }
-    return t;
-}
-Ocr.Entry.prototype.put = function(line, chr, t){
-    var t1;
-    var i=0;
-    var rIn = this.input[line];
-    i = rIn.length - 1;
-   // alert("length " +rIn.length);
-    //alert(rIn[0]);
-    var rOut = this.output[line];
-
-    if (rIn.length == 0){
-        rIn.push(t);
-        rOut.push(chr);
-        return;
-    }
-        while (i >=0 && rIn[i].x > t.x  )
-            i--;
-    //alert("i is " + i);
-    if (i== -1) {
-        rIn.splice(0, 0, t);
-        rOut.splice(0,0, chr);
-    }
-    else {
-        rIn.splice(i + 1, 0, t);
-        rOut.splice(i +1 ,0, chr);
-
-    }
-    
-}
-/**
- * normalize input data
- * output la mang 14 x 10
- */
-Ocr.Entry.prototype.normalize = function(input){
-    var DOWNSAMPLE_HEIGHT = 14;
-    var DOWNSAMPLE_WIDTH = 10;
-
-    var width = input[0].length;
-    var height = input.length;
-    
-    var cellWidth= width / DOWNSAMPLE_WIDTH;
-    var cellHeight = height/DOWNSAMPLE_HEIGHT;
-
-   // alert("height" + height + "," +cellWidth);
-    
-    //alert(scaleX);
-    var out = new Array (DOWNSAMPLE_HEIGHT);
-    for (var i=0; i< DOWNSAMPLE_HEIGHT; i++){
-        out[i] = new Array(DOWNSAMPLE_WIDTH);
-        for (var j=0; j< DOWNSAMPLE_WIDTH ; j++)
-            out[i][j] = 0;
-    }
-    for(var row = 0, i= 0; row<DOWNSAMPLE_HEIGHT; row++ )
-    {
-        for(var col = 0; col<DOWNSAMPLE_WIDTH; col++)
-        {
-            var x = Math.floor(cellHeight * row);
-            var y = Math.floor(cellWidth * col);
-            
-            
-            
-            var d = false;
-            // see if at least one pixel is "black"
-            var maxX = x + cellHeight;
-            var maxY = y + cellWidth;
-            for (var i=x ; i <maxX; i++)
-            for(var j =y; j< maxY; j++)
-            {
-
-                if( input[i][j] == 0 ) 
-                {
-                    d = true;
-                    break;
-                }
-            }
-            
-            if( d ){
-                out[row][col] = 1;
-            } else {
-                out[row][col] = 0;
-            }
-        }
-    }
-    
-
-    return out;
-};
-Ocr.Entry.prototype.showGuide = function(){
-     //redraw guide line
-    if (this.guide){
-        this.context.lineWidth = "1";
-        this.context.strokeStyle ="#000";
-        this.context.fillRect(0,0, this.width, this.height);
-        var h = this.height/this.nLine;
-        for (var i=1; i< this.nLine; i++){
-            this.context.beginPath();
-            this.context.moveTo(0, i * h);
-            this.context.lineTo(this.width, i * h);
-            this.context.stroke();
-            this.context.closePath();
-        }
-        this.context.strokeStyle="#00ff00";
-        this.context.lineWidth = "4";
-    }
-};
-Ocr.Entry.prototype.display = function(){
-    this.enable();
-    this.canvas.css.display = "block";
-};
-Ocr.Entry.prototype.hide= function(){
-    this.canvas.css.display = "none";
-};
-/**
- * Update data
- *
- */
-Ocr.Entry.prototype.update = function(){
-    this.output = new Array(this.nLine);
-    for (var i=0; i< this.output.length; i++)
-        this.output[i] = new Array();
-    var that = this;
-    for (var i=0; i< this.nLine; i++) {
-        var inRow = this.input[i];
-        var outRow = this.output[i];
-        for (var j=0; j< inRow.length; j++){
-            //alert(inRow[j]);
-            var data = this.getData(inRow[j].x, inRow[j].y, inRow[j].w, inRow[j].h);
-            outRow.push(data);
-        }
-
-    }
-};
-Ocr.Entry.prototype.undoText= function(){
-
-    var that = this;
-    if (this.undo.length == 0) {   
-        if (!that.cleared) {
-            this.context.clearRect(0,0, this.width, this.height);
-            this.context.fillStyle="rgba(0,0,0,0)";
-            this._target.value = "";
-            this.showGuide();
-            this.cleared = true;
-            this.r = true;
-   
-   
-        }
-        return;
-    }
-    if (!this.u){
-        this.redo.push(this.undo.pop());
-        this.redoData.push(this.undoData.pop());
-        //alert(this.input.length);
-        this.u = true;
-        this.r = false;
-    }
-    if (this.undo.length == 0) {   
-        if (!this.cleared) {
-            this.context.clearRect(0,0, this.width, this.height);
-              this.context.fillStyle="rgba(0,0,0,0)";
-            this._target.value = "";
-            this.showGuide();
-            this.cleared = true;
-            this.r = true;
-        }
-        return;
-    } 
-    var src;
-    var img = new Image();
-
-   
-    src = this.undoData.pop();
-    this.redoData.push(src);
-    this.input = this.undo.pop();
-    
-    this.redo.push(this.input);
-
-    img.src = src;
-   // alert(this.input.length);
-    var that = this;
-    img.onload = function(){   
-        that.context.clearRect(0, 0, that.canvas.width, that.canvas.height);
-        that.context.drawImage(img, 0, 0, that.canvas.width, that.canvas.height);
-        that.context.fillStyle="rgba(0,0,0,0)";
-
-
-        that.update();
-        that.recognize_actionPerformed();
-        
-    }
-
-};
-
-Ocr.Entry.prototype.redoText= function(){
-
-
-    if (this.redo.length == 0){
-        this.u = false;
-        return;
-    }
-    if (!this.r){
-        this.undo.push(this.redo.pop());
-        this.undoData.push(this.redoData.pop());
-        this.u = false;
-        this.r = true;
-    }
-    if (this.redo.length == 0){
-        this.u = false;
-        return;
-    }
-    this.cleared = false;
-    var src;
-    var img = new Image();
-
-    src = this.redoData.pop();
-
-    this.undoData.push(src);
-    this.input = this.redo.pop();
-    
-    this.undo.push(this.input);
-
-    img.src = src;
-
-    var that = this;
-    img.onload = function(){
-        that.context.clearRect(0, 0, that.canvas.width, that.canvas.height);
-        that.context.drawImage(img, 0, 0, that.canvas.width, that.canvas.height);
-
-        that.update();
-        that.recognize_actionPerformed();
-     
-    }
-};
-Ocr.Entry.prototype.drawItem = function (data, x, y){
-    var height = data.length;
-    var width =  data[0].length;
-
-    var index = 0;
-    var img = this.context.createImageData(width, height);
-    for (var i=0; i< height; i++){
-        for (var j=0; j< width; j++){
-            if (data[i][j])
-                img.data[index] = img.data[index +1] = img.data[index+2] = 0;
-            else
-                img.data[index] = img.data[index +1] = img.data[index+2] = 255;
-
-            img.data[index+3]= 255;
-            index+=4;
-        }
-    }
-     
-    this.context.putImageData(img, x, y);
-    //this.context.strokeRect(x,y, width, height);
-};
-
-Ocr.Entry.prototype.draw = function(x, y){
-   // for (var i=0; i< this.nLine; i++) {
-   //      var row = this.output[i];
-   //      for (var j=0; j< row.length; j++) {
-   //          if (row[i] != null)
-   //              this.drawItem(row[j], x + i * 20, y + j * 20);
-   //      }
-   // }
-   for (var i=0; i< this.output[0].length; i++){
-        if (this.output[0][i] != null)
-        this.drawItem(this.output[0][i], x + i * 20, y + i );
-   }
-}
-Ocr.Entry.prototype.collide = function(o1, o2, i){
- 
-    if (o1.x> o2.x + o2.w)
-        return false;
-    if (o1.x +o1.w <o2.x )
-        return false;
-    if (o1.y> o2.y + o2.h)
-        return false;
-    if (o1.y + o1.h < o2.xy)
-        return false;
-
-    return true;
-}
-
-/**
- * throttle function
- *  Tao do tre lang nghe su kien
- */
-function throttle(fn, delay) {
-      var timer = null;
-      return function () {
-        var context = this, args = arguments;
-        clearTimeout(timer);
-        timer = setTimeout(function () {
-          fn.apply(context, args);
-        }, delay);
-      };
-}
-
-Ocr.Entry.prototype.test = function(){
-    this.context.clearRect(50, 390, 700, 100);
-    this.context.strokeRect(20, 390, 700, 50);
-    this.draw(50,150);
-    this.timeId = null;
-}
-/**
- * Matrix methods
- *
- */
-Matrix = {
-    create : function(m, n) {
-        var mt = new Array(m);
-
-        for (var i = 0; i < m; i++)
-            mt[i] = new Array(n);
-
-        return mt;
-    },
-    fill : function(matrix, v) {
-        for (var i = 0; i < matrix.length; i++) {
-            for (var j = 0; j < matrix[0].length; j++) {
-                matrix[i][j] = v;
-            }
-        }
-    },
-    clone : function(m) {
-        var c = Matrix.create(m.length, m[0].length);
-        for (var i = 0; i < m.length; i++) {
-            for (var j = 0; j < m[0].length; j++) {
-                c[i][j] = m[i][j];
-            }
-        }
-        return c;
-    },
-    convolve : function(m1, filter) {
-        var temp = Matrix.clone(m1);
-
-        var divisionFactor = 0;
-        var halfSize = Math.floor(filter.length / 2);
-        // for ( y2 = 0; y2 < filter.length; y2++)
-        //     for ( x2 = 0; x2 < filter.length; x2++) {
-        //         divisionFactor += filter[y2][x2];
-
-        //     }
-        // if (divisionFactor < 1)
-            divisionFactor = 1;
-        //apply filter
-        var mR = m1.length - filter.length;
-        var mC = m1[0].length - filter.length;
-        for (var i = 0; i < mR; ++i) {
-            for (var j = 0; j < mC; ++j) {
-                var result = 0;
-
-                for (var x2 = 0; x2 < filter.length; ++x2)
-                    for (var y2 = 0; y2 < filter.length; ++y2) {
-                        result += m1[i+x2][j + y2] * filter[x2][y2];
-                    }
-                result /= divisionFactor;
-                temp[i + halfSize][j + halfSize] = Math.floor(result);
-
-            }
-        }
-
-        return temp;
-    }
-}
-/*
- * Object method adding
- *
- */
-Object.clone = function(obj) {
-    var o = {};
-    var v;
-    for (var i in obj) {
-        if (i == "constructor" || i == "prototype") {
-            o[i] = obj[i];
-            alert("clone constructor or prototype");
-        } else if (obj[i] instanceof Object) {
-            v = Object.clone(obj[i]);
-            o[i] = v;
-        } else
-            o[i] = obj[i];
-    }
-    return o;
-}
- 

@@ -23,7 +23,7 @@ window.onload = function(){
 	ocrTool = new goo.OCRTool('container',startApp);
 	function startApp(){
 		var img = new Image();
-		img.src = 'images/test1.png';
+		img.src = 'images/test7.png';
 
 		img.onload = function(){
 			ocrTool.setImage(img);
