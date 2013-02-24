@@ -1,9 +1,9 @@
 var goo = {
-	version: "0.0.1",
+	version: "0.1.0",
 	author: "TuanZendF"
 };
 goo.config = { //config
-	SAMPLEWIDTH : 10,
+	SAMPLEWIDTH : 8,
 	SAMPLEHEIGHT : 14
 };
 goo.Initialize = function(container,width, height){
@@ -49,7 +49,7 @@ goo.setSize = function(w, h){
  * goo.Bitmap
  *
  */
-goo.Bitmap = function(img){
+goo.Bitmap = function(img, config){
 	var that = this;
 
 	that.tool = null;
@@ -78,7 +78,7 @@ goo.Bitmap = function(img){
 	//this.makeHistogram();
 	this.toBinary();
 	this.calcTextRange();
-	
+
 };
 var Bitmap_proto = goo.Bitmap.prototype;
 /**
@@ -89,10 +89,10 @@ Bitmap_proto.draw = function(x,y){
 };
 /**
  * normalize input data
- * output size 14 x 10
+ * output size 14 x 8
  */
-goo.Bitmap.extractFeature = function(input){
-    var DOWNSAMPLE_HEIGHT = goo.config.SAMPLEHEIGHT ;
+goo.Bitmap.extractFeature = function(input, maxHeight){
+	var DOWNSAMPLE_HEIGHT = goo.config.SAMPLEHEIGHT ;
     var DOWNSAMPLE_WIDTH = goo.config.SAMPLEWIDTH;
 
     var width = input[0].length;
@@ -125,7 +125,7 @@ goo.Bitmap.extractFeature = function(input){
 	                if (input[i][j] == 0)
 	                	gray ++;
 	            }
-            out[row][col] = (gray * 1.0 / (cellWidth * cellHeight) - 0.5)/2;
+            out[row][col] = (gray * 1.0 / (cellWidth * cellHeight) - 0.5) * 2;
         }
     }
 
@@ -152,7 +152,6 @@ goo.Bitmap.extractFeature = function(input){
             var maxY = y + cellWidth;
             if (maxY > width - 1)
             	maxY = width - 1;
-            gray = 0;
             for (var i=x ; i <maxX; i++)
 	            for(var j =y; j< maxY; j++)
 	            {
@@ -174,50 +173,166 @@ goo.Bitmap.extractFeature = function(input){
     //extract other feature
     for (var i=0; i< DOWNSAMPLE_WIDTH; i++) {
 
-    	// //vertical an hotizontal projection
+    	//vertical an hotizontal projection
     	// var count = 0;
     	// for (var j=DOWNSAMPLE_WIDTH/2; j >= 0; j--) 
     	// 	count += sample[j][i];
 
-    	// out[DOWNSAMPLE_WIDTH][i] = count * 2.0 / (DOWNSAMPLE_WIDTH);
+    	// out[DOWNSAMPLE_WIDTH + 6][i] = count * 2.0 / (DOWNSAMPLE_WIDTH);
 
     	// count = 0;
     	// for (var j=DOWNSAMPLE_WIDTH/2 + 1; j< DOWNSAMPLE_WIDTH; j++) 
     	// 	count += sample[j][i];
-    	// out[DOWNSAMPLE_WIDTH + 1][i] = count * 2.0 / (DOWNSAMPLE_WIDTH);
+    	// out[DOWNSAMPLE_WIDTH + 7][i] = count * 2.0 / (DOWNSAMPLE_WIDTH);
 
-    	// count = 0;
-    	// for (var j=0; j< DOWNSAMPLE_WIDTH/2; j++)
-    	// 	count += sample[i][j];
-    	// out[DOWNSAMPLE_WIDTH + 2][i] = count * 2.0 / (DOWNSAMPLE_WIDTH);
+    	count = 0;
+    	for (var j=0; j< DOWNSAMPLE_WIDTH/2; j++)
+    		count += sample[i][j];
+    	out[DOWNSAMPLE_WIDTH + 4][i] = count * 2.0 / (DOWNSAMPLE_WIDTH);
 
-    	// count = 0;
-    	// for (var j=DOWNSAMPLE_WIDTH/2 + 1; j< DOWNSAMPLE_WIDTH; j++) 
-    	// 	count += sample[i][j];
-    	// out[DOWNSAMPLE_WIDTH + 3][i] = count * 2.0 / (DOWNSAMPLE_WIDTH);
+    	count = 0;
+    	for (var j=DOWNSAMPLE_WIDTH/2 + 1; j< DOWNSAMPLE_WIDTH; j++) 
+    		count += sample[i][j];
+    	out[DOWNSAMPLE_WIDTH + 5][i] = count * 2.0 / (DOWNSAMPLE_WIDTH);
 
     	//vertical and hotizontal profile
     	var j = 0;
     	while (j< DOWNSAMPLE_WIDTH && sample[i][j] == 0 ) j++;
-    	out[DOWNSAMPLE_WIDTH][i] = (j * 1.0 / DOWNSAMPLE_WIDTH - 0.5)/2;
+    	out[DOWNSAMPLE_WIDTH][i] = j * 1.0 / DOWNSAMPLE_WIDTH ;
 
     	var j = DOWNSAMPLE_WIDTH - 1;
     	while (j>=0 && sample[i][j] == 0 ) j--;
-    	out[DOWNSAMPLE_WIDTH + 1][i] = ((DOWNSAMPLE_WIDTH - j) * 1.0 / DOWNSAMPLE_WIDTH - 0.5)/2;
+    	out[DOWNSAMPLE_WIDTH + 1][i] = (DOWNSAMPLE_WIDTH - j) * 1.0 / DOWNSAMPLE_WIDTH;
 
 		var j = 0;
     	while (j< DOWNSAMPLE_WIDTH && sample[j][i] == 0) j++;
-    	out[DOWNSAMPLE_WIDTH + 2][i] = (j * 1.0 / DOWNSAMPLE_WIDTH - 0.5) /2;
+    	out[DOWNSAMPLE_WIDTH + 2][i] = j * 1.0 / DOWNSAMPLE_WIDTH;
 
     	var j = DOWNSAMPLE_WIDTH - 1;
     	while (j>=0 && sample[j][i] == 0 ) j--;
-    	out[DOWNSAMPLE_WIDTH + 3][i] = ((DOWNSAMPLE_WIDTH - j) * 1.0 / DOWNSAMPLE_WIDTH - 0.5)/2;
+    	out[DOWNSAMPLE_WIDTH + 3][i] = (DOWNSAMPLE_WIDTH - j) * 1.0 / DOWNSAMPLE_WIDTH;
 
     }
     delete sample;
-  // alert(out)
     return out;
 };
+Bitmap_proto.cannyEdgeDetector = function() {
+    var sowerby_x = [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]];
+    var sowerby_y = [[-1, -2, -1], [0, 0, 0], [1, 2, 1]];
+    //var prewitt_x = [[-1, 0, 1], [-1, 0,1], [-1, 0, 1]]
+    //var prewitt_y = [[-1, -1, -1], [0, 0, 0], [1, 1, 1]];
+    var grX = Matrix.clone(this.data);
+    grX = Matrix.convolve(grX, sowerby_x);
+
+    var grY = Matrix.clone(this.data);
+    grY = Matrix.convolve(grY, sowerby_y);
+
+    var mag = this.data;
+    var dir = Matrix.create(grX.length, grX[0].length);
+
+    //cal mag and direction
+    for (var i = 1; i < this.height-1; i++) {
+        for (var j = 1; j < this.width-1; j++) {
+            mag[i][j] = Math.floor(Math.sqrt(grX[i][j] * grX[i][j] + grY[i][j] * grY[i][j]));
+            dir[i][j] = calDirection(grX[i][j], grY[i][j]);
+        }
+    }
+
+    //NonMaximaSuppressor
+    for (var i = 1; i < mag.length - 1; i++) {
+        for (var j = 1; j < mag[0].length - 1; j++) {
+            switch(dir[i][j]) {
+                case 0:
+                    mag[i][j] = 0;
+                    break;
+                case 1:
+                    if (mag[i][j] < mag[i-1][j] || mag[i][j] < mag[i+1][j])
+                        mag[i][j] = 0;
+                    break;
+                case 2:
+                    if (mag[i][j] < mag[i+1][j] || mag[i][j] < mag[i][j+1])
+                        mag[i][j] = 0;
+                    break;
+                case 3:
+                    if (mag[i][j] < mag[i+1][j + 1] || mag[i][j] < mag[i-1][j - 1]) {
+                        mag[i][j] = 0;
+                    }
+                    break;
+                case 4:
+                    if (mag[i][j] < mag[i+1][j - 1] || mag[i][j] < mag[i-1][j + 1]) {
+                        mag[i][j] = 0;
+                    }
+                    break;
+            }
+        }
+    }
+
+    //threshold
+    //var max = 80,
+    //var min = 20
+    for (var i = 0; i < mag.length; i++) {
+        for (var j = 0; j < mag[0].length; j++) {
+            if (mag[i][j] >= 80)
+                mag[i][j] = 255;
+            else if (mag[i][j] < 20)
+                mag[i][j] = 0;
+            else
+                mag[i][j] = 128;
+        }
+    }
+    //track
+    var update = true;
+    while (update) {
+        update = false;
+
+        for (var i = 1; i < mag.length - 1; i++) {
+            for (var j = 0; j < mag[0].length - 1; j++) {
+                if (mag[i][j] == 255) {
+                    for (var m = -1; m < 2; m++) {
+                        for (var n = -1; n < 2; n++) {
+                            if (mag[i+m][j + n] == 128) {
+                                mag[i+m][j + n] = 255;
+                                update = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    //remove weak edge
+    for (var i = 0; i < mag.length; i++) {
+        for (var j = 0; j < mag[0].length; j++) {
+            if (mag[i][j] <255  ){
+                mag[i][j] = 0;
+            }
+        }
+    }
+    //function
+    function calDirection(x, y) {
+        if (x == 0)
+            if (y == 0)
+                return 0;
+            else
+                return 1;
+        if (y == 0)
+            return 2;
+    
+        var angle = Math.atan(y * 1.0 / x) * (180.0 / Math.PI);
+        if (-22.5 <= angle && angle <= 22.5){
+            return 2;
+        }
+        else if (-67.5 <= angle && angle <-22.5){
+            return 4;
+        }
+        else if ( 22.5 <= angle && angle < 67.5)
+            return 3;
+        else if (angle > 67.5 || angle <-67.5)
+            return 1;
+    }
+};
+
 goo.drawImage = function(arr,x,y,isPrivContext) {
 
 	var img = goo.ct.createImageData(arr[0].length, arr.length);
@@ -370,8 +485,10 @@ Bitmap_proto.findNextCol = function(x, y1, y2, dir) {
 		if (this.isEmptyCol(x,y1,y2)) {
 			x++;
 			while ((this.isEmptyCol(x,y1,y2)) && x <= this.right) x++;
+			//x--;  // error here ?
 		}else {
 			while (!this.isEmptyCol(x+1,y1,y2) &&  x <= this.right) x++;
+			//x --;
 		}
 	}
 	else {
@@ -432,11 +549,10 @@ Bitmap_proto.histEqualize = function(){
  * convert to binary Image
  */
 Bitmap_proto.toBinary = function(threshold) {
-    //alert('binary');
+
     if (threshold) { //has threshold parameters
         for (var i = 0; i < this.height; i++) {
             for (var j = 0; j < this.width; j++) {
-		//alert(this.data + "is" );
                 if (this.data[i][j] < threshold)
                     this.data[i][j] = 0;
                 else
@@ -444,7 +560,6 @@ Bitmap_proto.toBinary = function(threshold) {
             }
         }
     } else {
-	//alert('local')
         //use local threshold algorithm
         //local size : 5x5
         for (var x = 0; x < this.height - 5; x += 5) {
@@ -593,7 +708,6 @@ goo.Tool = function(bitmap){
 				//alert('mouse down')
 				isMousedown = true;
 				
-				//alert(x);
 				getMousePos(e);
 				p1 = new Point(x,y);
 				break;
@@ -611,19 +725,8 @@ goo.Tool = function(bitmap){
 				}
 				break;
 			case "mouseup":
+				
 				isMousedown = false;
-				//alert('mouse up')
-				//if (OCRTool ) {    //recognition
-					//alert('has tool')
-				//	that.separateChar(true);
-					//var data = that.getData();
-					//alert(data.length);
-					// OCRTool.recognize_actionPerformed(data);
-					// //alert(OCRTool.getResult());
-					// if (OCRTool.clip) {//has clipboard
-					//  	OCRTool.clip.setText(OCRTool.getResult());
-					// }
-				//}
 				break;
 		}
 	}
@@ -688,7 +791,6 @@ tool_proto.separateLine = function(p1, p2){
 		while (!bitmap.isEmptyLine(yB)) yB --;
 		yB++;
 	}	
-//	alert(yB + ', ' + y1)
 	if (yB == y1) {  //same line
 		//alert('same line');
 		y2 = bitmap.findNextEmptyLine(y1);
@@ -709,7 +811,7 @@ tool_proto.separateLine = function(p1, p2){
 			var o = {x: x1, y: y1, w: x2 -x1 +1, h: y2 - y1 + 1};
 			that.hlSet.push(o);
 		}
-		goo.Highlight(that.hlSet);	  
+		//goo.Highlight(that.hlSet);	  
 		return;
 	}
 	else {  //not in same line
@@ -776,18 +878,16 @@ tool_proto.separateChar = function(includeSpace){
 
 			y2 = block.y + block.h -1;
 			x2 = bitmap.findNextCol(x1,y1,y2,0);
-			//alert(bitmap.isEmptyCol(x1,y1,y2))
 			//alert(x1 + ", " + x2)
 			//while (bitmap.isEmptyLine(y1,x1, x2)) y1++;
-
 			while (bitmap.isEmptyLine(y2,x1, x2)) y2--;
-			var o = {x: x1, y: y1, w: x2 -x1 +1, h: y2 - y1 + 1};
-			hlSet.push(o);
-			//alert('test')
+			if (x2 <= xR && x1 < x2){
+				var o = {x: x1, y: y1, w: x2 -x1 +1, h: y2 - y1 + 1};
+				hlSet.push(o);
+			}
 			x1 =  bitmap.findNextCol(x2 + 1,y1,y2,0);
-			if (includeSpace && x1 -x2 > 0.25 * block.h) { //push space
+			if (includeSpace && x1 -x2 > 0.5 * block.h ) { //push space
 				hlSet.push({space: true});
-				//alert('add space')
 			}
 		}
 		if (includeSpace) {
@@ -795,17 +895,9 @@ tool_proto.separateChar = function(includeSpace){
 			n ++ ;
 		}
 	}
-	// alert('line ' + n)
 	//goo.Highlight(hlSet);
 	this.hlSet = hlSet;
 };
-tool_proto.normalizeCharacterSet = function(){
-	for (var i=0; i< this.hlSet.length; i++){
-		this.hlSet[i] = goo.Bitmap.resize(this.hlSet[i]);
-		//alert(' test')
-	}
-};
-
 tool_proto.test = function(){
 	var bitmap = this.bitmap;
 	goo.privContext.clearRect(0,0, bitmap.width, bitmap.height);
@@ -822,6 +914,10 @@ tool_proto.getData = function(){
 	var out = [];
 	goo.privContext.clearRect(0,0, bitmap.width, bitmap.height);
 	var hlSet = this.hlSet;
+	//calculate max height
+	var maxHeight = hlSet[0].h;
+	for (var i=0; i< hlSet.length; i++)
+		if (hlSet[i].h > maxHeight) maxHeight = hlSet[i].h;
 
 
 	for (var i=0; i< this.hlSet.length; i++){
@@ -835,11 +931,11 @@ tool_proto.getData = function(){
 			out.push(" \n");
 			//alert('line')
 		}else {
-			var matrix = goo.Bitmap.extractFeature(bitmap.getBitmap(o));
+			var matrix = goo.Bitmap.extractFeature(bitmap.getBitmap(o),maxHeight);
 			out.push(matrix);
 		}
 	}
-	//alert('out length ' + out.length
+	//alert('out length ' + out.length)
 	return out;
 };
 /**
@@ -886,7 +982,7 @@ goo.OCRTool = function(containerId,onload){
 		bitmap.addHighlightTool();
 		bitmap.tool.separateLine(new Point(0,0), new Point(img.width -1 , img.height - 1));
 		bitmap.tool.separateChar();
-		//goo.Highlight(bitmap.tool.hlSet)
+	    //	goo.Highlight(bitmap.tool.hlSet)
 		//get data
 		//this.data = bitmap.tool.getData();
 		that.preload(bitmap.tool.getData());
@@ -897,13 +993,9 @@ goo.OCRTool = function(containerId,onload){
 	this.onload = onload;
 	this.sampleList = [];
 	this.net = null;
-	this.map = null;
+	this.map = {};
 	this.requireTrain = true;
 	this.text = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789(),.'; //--> todo
-	this.features = new Array( goo.config.SAMPLEWIDTH * goo.config.SAMPLEHEIGHT);
-
-	for (var i=0; i< this.features.length; i++)
-		this.features[i] = i;
 };
 var OCRTool_proto = goo.OCRTool.prototype;
 OCRTool_proto.addClipboard = function(clip){
@@ -913,16 +1005,47 @@ OCRTool_proto.addClipboard = function(clip){
  * Preload Data
  */
 OCRTool_proto.preload = function(data){  
-	this.net = new Som({features:  this.features, iterationCount: data.length, width: 10, height: 10});
-	//initialize SOM with default distance function (euclidean)
-	this.net.init({});
-	for (var i=0; i< data.length; i++)
-		this.net.train(this.text[i], data[i]);
-	alert('train sucess..');
+    //alert('this.text.length + ',' + data.length)
+    for (var i=0,len = data.length; i< len; i++){
+  		var ds = new SampleData(this.text[i],goo.config.SAMPLEWIDTH, goo.config.SAMPLEHEIGHT); // size 10x14
+  		ds.grid = Matrix.clone(data[i])
+  		this.sampleList.push(ds);
+  		
+    }
 
-	 if (this.onload && typeof this.onload == 'function') 
+    //train
+    this.train_actionPerformed();
+    alert('train sucess ..')
+    if (this.onload && typeof this.onload == 'function') 
     	this.onload();
 
+};
+
+/**
+ * Traing action performed
+ */
+OCRTool_proto.train_actionPerformed = function(){
+    var sampleList = this.sampleList;
+
+    var inputCount =goo.config.SAMPLEWIDTH * goo.config.SAMPLEHEIGHT;
+    var outputNeuron = sampleList.length; //so luong ky tu huan luyen
+
+    var set = new TrainingSet(inputCount, outputNeuron);
+    set.setTrainingSetCount(outputNeuron);
+    for (var t = 0; t <sampleList.length; t++){
+        var idx = 0;
+        var ds = sampleList[t];
+        for (var x=0; x<ds.getHeight(); x++){
+            for (var y = 0; y<ds.getWidth(); y++){
+                set.setInput(t, idx++, ds.getData(x,y));
+            }
+        }
+    }
+    this.net = new KohonenNetwork(inputCount, outputNeuron);
+    this.net.setTrainingSet(set);
+
+    this.net.learn();
+    this.map = this.mapNeurons();
 };
 /**
  * Recognize action performed
@@ -934,7 +1057,6 @@ OCRTool_proto.recognize_actionPerformed = function(){
 	var tool = this.img.tool;
 	tool.separateChar(true);
 	var data = tool.getData();
-
     if (this.net == null) {
         alert("I need to be trained first");
         return "";
@@ -948,25 +1070,23 @@ OCRTool_proto.recognize_actionPerformed = function(){
        		//if (data[i] == " \n") alert('new line')
        		//alert('t'+ data[i] + 't')
        	}else {
-	        var input = Array.concat.apply(null, data[i]); //convert 2d array to 1d array
-	        var best = this.net.bestMatchingUnit(input);
-	        best = best.neighbors.default[0].id;
-	        alert(best);
-	        this.result += ""+ best;
+	        var input = [].concat.apply([], data[i]); //convert 2d array to 1d array
+	        var normfac = new Array(1);
+	        var best = this.net.winner(input, normfac);
+	        this.result += ""+ this.map[best];
        }
     }
     if ( this.clip) //has clipboard
     	this.clip.setText(this.result);
-   	//alert(this.result)
+   	alert(this.result)
 };
 OCRTool_proto.getResult = function(){
 	return this.result;
 }
 OCRTool_proto.setImage = function(img){
 
-	this.img = new goo.Bitmap(img);
+	this.img = new goo.Bitmap(img, true);
 	this.img.draw();
-//	this.img.addOCRTool(this);
 	this.img.addHighlightTool();
 
 }
@@ -997,6 +1117,5 @@ OCRTool_proto.mapNeurons = function(){
         map[best] = ds.getLetter();
        // alert(map[best])
     }
-   // alert(map);
     return map;
-}
+};

@@ -15,7 +15,7 @@ function KohonenNetwork(inputCount, outputCount){
 		this.output[i] = 0;
 	this.learnRate = 0.3;
 	this.quitError = 0.01;
-	this.retries = 800;
+	this.retries = 500;
 	this.reduction =0.99;
 }
 /**
